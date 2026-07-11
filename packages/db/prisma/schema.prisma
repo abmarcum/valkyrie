@@ -1,0 +1,68 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Tenant {
+  id        String    @id @default(uuid())
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  users     User[]
+  projects  Project[]
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String?
+  role      String   @default("developer") // admin, developer, sre, qa
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Project {
+  id                  String             @id @default(uuid())
+  name                String
+  description         String?
+  programmingLanguage String             @default("typescript") // typescript, python, go, etc.
+  vcsPlatform         String             @default("github") // github, gitlab, bitbucket
+  vcsRepoUrl          String?
+  vcsAuthType         String             @default("personal_access_token") // personal_access_token, github_app
+  githubInstallationId String?
+  deployTarget        String             @default("aws") // aws, gcp, onprem, azure
+  tenantId            String
+  tenant              Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agentRuns           AgentRun[]
+  analysisCache       CodeAnalysisCache[]
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+}
+
+model AgentRun {
+  id         String   @id @default(uuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status     String   @default("PLANNING") // PLANNING, GENERATING, COMMITTED, QA_LOOP, DEPLOYING, ACTIVE, FAILED
+  logs       String   // SQLite JSON stored as string: Array of logs: { timestamp, agentId, message }
+  costInfo   String   // SQLite JSON stored as string: Cost tracking: { promptTokens, completionTokens, costUSD }
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model CodeAnalysisCache {
+  id             String   @id @default(uuid())
+  projectId      String
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fileHash       String   @unique
+  filePath       String
+  analysisResult String // Cached agent check results (e.g. security audits, performance scans)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}

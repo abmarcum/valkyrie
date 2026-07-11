@@ -1,0 +1,471 @@
+#!/usr/bin/env tsx
+
+import http from "http";
+import fs from "fs";
+import path from "path";
+import { exec } from "child_process";
+import { RunTree } from "langsmith";
+
+// Manual .env parser to avoid external dependency issues
+function loadDotenv(filePath: string) {
+  try {
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, "utf-8");
+      content.split("\n").forEach(line => {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith("#") && trimmed.includes("=")) {
+          const eqIdx = trimmed.indexOf("=");
+          const key = trimmed.substring(0, eqIdx).trim();
+          let val = trimmed.substring(eqIdx + 1).trim();
+          if (val.startsWith('"') && val.endsWith('"')) {
+            val = val.substring(1, val.length - 1);
+          } else if (val.startsWith("'") && val.endsWith("'")) {
+            val = val.substring(1, val.length - 1);
+          }
+          process.env[key] = val;
+        }
+      });
+    }
+  } catch (e) {}
+}
+
+loadDotenv(path.join(__dirname, "../../../.env"));
+
+const args = process.argv.slice(2);
+const projectIdIndex = args.indexOf("--project");
+const projectId = projectIdIndex !== -1 ? args[projectIdIndex + 1] : "proj-1";
+const orchestratorUrl = process.env.ORCHESTRATOR_URL || "http://localhost:4000";
+
+console.log(`===============================================`);
+console.log(` Valkyrie Local QA Runner CLI & AI QA Agent v1.0.0`);
+console.log(` Target Project: ${projectId}`);
+console.log(` Central Orchestrator: ${orchestratorUrl}`);
+console.log(`===============================================`);
+
+// Helper to post JSON report
+function sendReport(passed: boolean, logs: string[], errors: string[]) {
+  const payload = JSON.stringify({ passed, logs, errors });
+  const url = new URL(`${orchestratorUrl}/api/projects/${projectId}/qa-report`);
+  
+  const req = http.request({
+    hostname: url.hostname,
+    port: url.port,
+    path: url.pathname,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(payload)
+    }
+  }, (res) => {
+    let data = "";
+    res.on("data", (chunk) => { data += chunk; });
+    res.on("end", () => {
+      console.log(`[Report Status] Central Server Response: ${res.statusCode} - ${data}`);
+      console.log(`QA run completed successfully.`);
+    });
+  });
+
+  req.on("error", (err) => {
+    console.error(`[Error] Failed to transmit report back to orchestrator:`, err.message);
+  });
+
+  req.write(payload);
+  req.end();
+}
+
+// Download files from orchestrator REST endpoint
+function downloadWorkspaceFiles(): Promise<Array<{ name: string; content: string }>> {
+  return new Promise((resolve, reject) => {
+    const url = `${orchestratorUrl}/api/projects/${projectId}/files`;
+    
+    http.get(url, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`Failed to fetch project files. Status: ${res.statusCode}`));
+        return;
+      }
+      
+      let rawData = "";
+      res.on("data", (chunk) => { rawData += chunk; });
+      res.on("end", () => {
+        try {
+          const data = JSON.parse(rawData);
+          resolve(data.files || []);
+        } catch (e: any) {
+          reject(e);
+        }
+      });
+    }).on("error", (err) => {
+      reject(new Error(`Connection failed to orchestrator at ${orchestratorUrl}. Make sure the development server is running (npm run dev) first! Error: ${err.message}`));
+    });
+  });
+}
+
+async function traceQALlmCall(
+  agentName: string,
+  prompt: string,
+  output: string,
+  promptTokens?: number,
+  completionTokens?: number
+) {
+  if (!process.env.LANGCHAIN_API_KEY) return;
+  try {
+    const costUSD = (promptTokens !== undefined && completionTokens !== undefined)
+      ? Number(((promptTokens * 0.075 / 1000000) + (completionTokens * 0.30 / 1000000)).toFixed(6))
+      : 0;
+
+    const runTree = new RunTree({
+      name: `${agentName} Decision`,
+      run_type: "llm",
+      inputs: { prompt },
+      project_name: process.env.LANGCHAIN_PROJECT || "valkyrie",
+      extra: {
+        metadata: {
+          model: "gemini-3.5-flash",
+          prompt_tokens: promptTokens || 0,
+          completion_tokens: completionTokens || 0,
+          total_tokens: (promptTokens || 0) + (completionTokens || 0),
+          cost_usd: costUSD,
+          rates: {
+            input_usd_per_million: 0.075,
+            output_usd_per_million: 0.30
+          }
+        }
+      }
+    });
+    await runTree.postRun();
+
+    await runTree.end({
+      outputs: { response: output }
+    });
+
+    if (promptTokens !== undefined) (runTree as any).prompt_tokens = promptTokens;
+    if (completionTokens !== undefined) (runTree as any).completion_tokens = completionTokens;
+    if (promptTokens !== undefined && completionTokens !== undefined) {
+      (runTree as any).total_tokens = promptTokens + completionTokens;
+      (runTree as any).cost = costUSD;
+    }
+
+    await runTree.patchRun();
+    console.log(`[QA LangSmith] QA execution successfully traced to LangSmith.`);
+  } catch (err: any) {
+    console.error("[QA LangSmith] Tracing failed:", err.message);
+  }
+}
+
+// Invoke Gemini API to write actual unit assertions for the code
+async function generateAIAssertions(files: Array<{ name: string; content: string }>, testFilename: string, ext: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    console.warn("[QA Agent] GEMINI_API_KEY is missing. Skipping AI QA testing suite generation.");
+    return "";
+  }
+
+  const codeFiles = files.filter(f => {
+    const name = f.name.toLowerCase();
+    return !name.startsWith("test.") && !name.startsWith("docs/") && !name.endsWith(".md") && !name.endsWith(".sql");
+  });
+
+  let codebasePrompt = "You are the Valkyrie QA Agent. Analyze the generated codebase below and write a comprehensive unit/integration test suite.\n\n";
+  codebasePrompt += "Here is the codebase files that you need to write tests for:\n\n";
+  
+  codeFiles.forEach(f => {
+    codebasePrompt += `=== File: ${f.name} ===\n${f.content}\n\n`;
+  });
+  
+  codebasePrompt += `Write a comprehensive, fully functional unit test file named '${testFilename}'.
+It must import/load the relevant source files and perform real assertions (e.g. testing pricing logic, currency structures, validation routes, or core classes).
+Do NOT use random numbers or dummy mock outcomes. Write actual assertions that test inputs and outputs.
+If database connections are needed, use mock database adapters or sqlite in-memory connections directly in the test file.
+For Python, write tests using python's built-in 'unittest' module and execute them. Ensure that if tests fail, you call exit(1), and if they pass, exit(0).
+For JavaScript, write native node assertions and execute them.
+Output ONLY the raw code inside a markdown code block (between \`\`\`${ext === "js" ? "javascript" : "python"} and \`\`\`). No explanations, no conversation.`;
+
+  console.log(`[QA Agent] Querying Gemini API (gemini-3.5-flash) to analyze code and generate assertions...`);
+
+  try {
+    const model = "gemini-3.5-flash";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: codebasePrompt }]
+          }
+        ],
+        systemInstruction: {
+          parts: [{ text: "You are a professional software QA automation engineer agent." }]
+        },
+        generationConfig: {
+          temperature: 0.2
+        }
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json() as any;
+      const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      const inputTokens = data.usageMetadata?.promptTokenCount || 0;
+      const outputTokens = data.usageMetadata?.candidatesTokenCount || 0;
+
+      // Log execution trace back to LangSmith API
+      await traceQALlmCall("QA Engineer (Runner)", codebasePrompt, responseText, inputTokens, outputTokens);
+      
+      const marker = ext === "js" ? "javascript" : "python";
+      const regex = new RegExp("```" + marker + "\\n([\\s\\S]*?)\\n```", "i");
+      const match = responseText.match(regex);
+      if (match && match[1]) {
+        return match[1];
+      }
+      return responseText.replace(/```[a-z]*\n/gi, "").replace(/```/g, "").trim();
+    } else {
+      const errText = await response.text();
+      console.error("[QA Agent] Gemini API call failed:", errText);
+    }
+  } catch (err: any) {
+    console.error("[QA Agent] Error communicating with Gemini API:", err.message);
+  }
+  return "";
+}
+
+// Verify that the application can start up and run without crashing
+function verifyApplicationStartup(sandboxDir: string, mainFilename: string, hasUv: boolean): Promise<{ success: boolean, logs: string[], errorMsg: string }> {
+  return new Promise(async (resolve) => {
+    let command = "";
+    if (mainFilename.endsWith(".js")) {
+      command = `node "${path.join(sandboxDir, mainFilename)}"`;
+    } else {
+      if (hasUv) {
+        const hasReq = fs.existsSync(path.join(sandboxDir, "requirements.txt"));
+        if (hasReq) {
+          command = `uv run --no-project --with-requirements requirements.txt python "${path.join(sandboxDir, mainFilename)}"`;
+        } else {
+          command = `uv run --no-project python "${path.join(sandboxDir, mainFilename)}"`;
+        }
+      } else {
+        const hasPython3 = await new Promise<boolean>((resolve) => {
+          exec("command -v python3", (err) => resolve(!err));
+        });
+        const binary = hasPython3 ? "python3" : "python";
+        command = `${binary} "${path.join(sandboxDir, mainFilename)}"`;
+      }
+    }
+
+    console.log(`[QA Runner] Startup test command: ${command}`);
+    const proc = exec(command, { cwd: sandboxDir });
+    
+    let stdoutData = "";
+    let stderrData = "";
+    let exited = false;
+    let exitCode: number | null = null;
+    let procError: any = null;
+
+    proc.stdout?.on("data", (chunk) => { stdoutData += chunk; });
+    proc.stderr?.on("data", (chunk) => { stderrData += chunk; });
+    proc.on("error", (err) => { procError = err; });
+    proc.on("exit", (code) => {
+      exited = true;
+      exitCode = code;
+    });
+
+    // Wait for 2.5 seconds to monitor startup behaviour
+    setTimeout(() => {
+      if (exited) {
+        if (exitCode !== 0 && exitCode !== null) {
+          resolve({
+            success: false,
+            logs: stdoutData.split("\n").filter(Boolean),
+            errorMsg: `Application failed startup immediately. Exit code: ${exitCode}. Stderr: ${stderrData || procError?.message}`
+          });
+        } else {
+          resolve({
+            success: true,
+            logs: stdoutData.split("\n").filter(Boolean),
+            errorMsg: ""
+          });
+        }
+      } else {
+        try {
+          proc.kill("SIGTERM");
+        } catch (e) {}
+        resolve({
+          success: true,
+          logs: stdoutData.split("\n").filter(Boolean),
+          errorMsg: ""
+        });
+      }
+    }, 2500);
+  });
+}
+
+let fixAttempts = 0;
+const MAX_FIX_ATTEMPTS = 3;
+
+// Poll status helper
+function pollForStatus(expectedStatus: string): Promise<void> {
+  return new Promise((resolve) => {
+    const interval = setInterval(() => {
+      const url = `${orchestratorUrl}/api/projects/${projectId}/status`;
+      http.get(url, (res) => {
+        if (res.statusCode === 200) {
+          let rawData = "";
+          res.on("data", (chunk) => { rawData += chunk; });
+          res.on("end", () => {
+            try {
+              const data = JSON.parse(rawData);
+              if (data.status === expectedStatus) {
+                clearInterval(interval);
+                resolve();
+              } else {
+                console.log(`[QA Runner] Current project status: ${data.status}. Waiting for Developer Agent fixes...`);
+              }
+            } catch (e) {}
+          });
+        }
+      }).on("error", () => {});
+    }, 5000);
+  });
+}
+
+// Run the QA verification process
+async function executeQA() {
+  try {
+    console.log(`\n[1/3] Downloading generated codebase files...`);
+    const files = await downloadWorkspaceFiles();
+    
+    if (files.length === 0) {
+      console.log(`No files generated yet. Check if orchestrator completed generation.`);
+      return;
+    }
+
+    // Prepare local sandbox folder
+    const sandboxDir = path.join(__dirname, "../sandbox", projectId);
+    fs.mkdirSync(sandboxDir, { recursive: true });
+
+    console.log(`[2/3] Writing files to local sandbox: ${sandboxDir}`);
+    files.forEach(file => {
+      const filePath = path.join(sandboxDir, file.name);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, file.content);
+      console.log(`  -> Wrote ${file.name}`);
+    });
+
+    // Locate application entry point and verify startup
+    const mainFile = files.find(f => f.name === "main.py" || f.name === "main.js" || f.name === "index.js" || f.name === "app/main.py" || f.name === "app/main.js");
+    if (mainFile) {
+      const hasUv = await new Promise<boolean>((resolve) => {
+        exec("command -v uv", (err) => resolve(!err));
+      });
+      const startupResult = await verifyApplicationStartup(sandboxDir, mainFile.name, hasUv);
+      if (!startupResult.success) {
+        console.error(`\n❌ QA Runner: Application failed to start!`);
+        console.error(startupResult.errorMsg);
+        
+        sendReport(false, startupResult.logs, [startupResult.errorMsg]);
+        
+        if (fixAttempts >= MAX_FIX_ATTEMPTS) {
+          console.error(`\n❌ QA Runner: Exceeded maximum fix attempts (${MAX_FIX_ATTEMPTS}). Halting self-healing loop.`);
+          return;
+        }
+
+        fixAttempts++;
+        console.log(`[QA Runner] (Attempt ${fixAttempts}/${MAX_FIX_ATTEMPTS}) Waiting for Developer Agent to analyze logs and apply fixes...`);
+        await pollForStatus("QA_LOOP");
+        console.log(`[QA Runner] Developer Agent has applied fixes! Re-triggering QA test suite run...`);
+        executeQA();
+        return;
+      }
+      console.log(`\n[QA Runner] Application startup verified successfully. Proceeding to AI QA Agent assertions testing...\n`);
+    }
+
+    console.log(`[3/3] Locating and executing test script assertions...`);
+    const testFile = files.find(f => f.name.startsWith("test."));
+    if (!testFile) {
+      console.log("No test script file found in generation workspace.");
+      sendReport(true, ["No test scripts found. Scaffolding marked successful."], []);
+      return;
+    }
+
+    const ext = testFile.name.endsWith(".js") ? "js" : "py";
+    const aiTestContent = await generateAIAssertions(files, testFile.name, ext);
+    if (aiTestContent) {
+      const testFilePath = path.join(sandboxDir, testFile.name);
+      fs.writeFileSync(testFilePath, aiTestContent);
+      console.log(`[QA Agent] Overwrote mock runner with AI assertions inside: ${testFile.name}`);
+    }
+
+    let command = "";
+    if (testFile.name.endsWith(".js")) {
+      command = `node "${path.join(sandboxDir, testFile.name)}"`;
+    } else {
+      const hasUv = await new Promise<boolean>((resolve) => {
+        exec("command -v uv", (err) => resolve(!err));
+      });
+      if (hasUv) {
+        const hasReq = fs.existsSync(path.join(sandboxDir, "requirements.txt"));
+        if (hasReq) {
+          command = `uv run --no-project --with-requirements requirements.txt python "${path.join(sandboxDir, testFile.name)}"`;
+        } else {
+          command = `uv run --no-project python "${path.join(sandboxDir, testFile.name)}"`;
+        }
+      } else {
+        const hasPython3 = await new Promise<boolean>((resolve) => {
+          exec("command -v python3", (err) => resolve(!err));
+        });
+        const binary = hasPython3 ? "python3" : "python";
+        command = `${binary} "${path.join(sandboxDir, testFile.name)}"`;
+      }
+    }
+
+    console.log(`Executing QA command: ${command}`);
+
+    exec(command, { cwd: sandboxDir }, async (error, stdout, stderr) => {
+      const logs = stdout.split("\n").filter(Boolean);
+      const errors = stderr.split("\n").filter(Boolean);
+
+      // Save stdout/stderr logs locally to the generated project directory for review and commit
+      try {
+        const genLogDir = path.join(__dirname, "../../../generated", projectId);
+        if (fs.existsSync(genLogDir)) {
+          const logContent = `========================================\n Valkyrie QA Runner Execution Log\n Project: ${projectId}\n Timestamp: ${new Date().toISOString()}\n Attempt: ${fixAttempts}\n Command: ${command}\n Status: ${error ? "FAILED" : "PASSED"}\n========================================\n\n[STDOUT]\n${stdout}\n\n[STDERR]\n${stderr || (error ? error.message : "")}\n`;
+          fs.writeFileSync(path.join(genLogDir, "qa_runner.log"), logContent, "utf-8");
+          console.log(`[QA Agent] QA Execution logs successfully saved to: generated/${projectId}/qa_runner.log`);
+        }
+      } catch (logErr: any) {
+        console.error("[QA Agent] Failed to write local log file:", logErr.message);
+      }
+
+      if (error) {
+        console.error(`\n❌ QA Suite Failure reported!`);
+        console.error(stderr || error.message);
+        errors.push(error.message);
+        sendReport(false, logs, errors);
+
+        if (fixAttempts >= MAX_FIX_ATTEMPTS) {
+          console.error(`\n❌ QA Runner: Exceeded maximum fix attempts (${MAX_FIX_ATTEMPTS}). Halting self-healing loop.`);
+          return;
+        }
+
+        fixAttempts++;
+        console.log(`[QA Runner] (Attempt ${fixAttempts}/${MAX_FIX_ATTEMPTS}) Waiting for Developer Agent to analyze logs and apply fixes...`);
+        await pollForStatus("QA_LOOP");
+        console.log(`[QA Runner] Developer Agent has applied fixes! Re-triggering QA test suite run...`);
+        // Recurse to run the updated codebase
+        executeQA();
+      } else {
+        console.log(`\n✅ QA Suite Success! All assertions verified.`);
+        console.log(stdout);
+        sendReport(true, logs, errors);
+      }
+    });
+
+  } catch (err: any) {
+    console.error(`\nQA Execution aborted:`, err.message);
+  }
+}
+
+executeQA();

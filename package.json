@@ -1,0 +1,21 @@
+{
+  "name": "valkyrie",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Multi-Agent SaaS Creator Platform",
+  "packageManager": "npm@11.5.1",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.4",
+    "typescript": "^5.4.5"
+  }
+}
