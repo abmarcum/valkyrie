@@ -1722,6 +1722,14 @@ async function traceLlmCall(
           rates: {
             input_usd_per_million: 0.075,
             output_usd_per_million: 0.30
+          },
+          usage_metadata: {
+            input_tokens: promptTokens || 0,
+            output_tokens: completionTokens || 0,
+            total_tokens: (promptTokens || 0) + (completionTokens || 0),
+            input_cost: Number(((promptTokens || 0) * 0.075 / 1000000).toFixed(6)),
+            output_cost: Number(((completionTokens || 0) * 0.30 / 1000000).toFixed(6)),
+            total_cost: costUSD
           }
         }
       }
