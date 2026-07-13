@@ -5,9 +5,9 @@
 Environment variables loaded from .env
 Prisma schema loaded from prisma/schema.prisma
 
-✔ Generated Prisma Client (v5.22.0) to ./../../node_modules/@prisma/client in 43ms
+✔ Generated Prisma Client (v5.22.0) to ./../../node_modules/@prisma/client in 49ms
 
 Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
 
-Tip: Want real-time updates to your database without manual polling? Discover how with Pulse: https://pris.ly/tip-0-pulse
+Tip: Curious about the SQL queries Prisma ORM generates? Optimize helps you enhance your visibility: https://pris.ly/tip-2-optimize
 
