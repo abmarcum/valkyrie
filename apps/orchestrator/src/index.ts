@@ -69,19 +69,38 @@ const SETTINGS_FILE = path.join(__dirname, "../settings.json");
 
 interface SystemSettings {
   selectedModel: string;
+  selectedProvider: string;
+  googleApiKey: string;
+  anthropicApiKey: string;
+  openaiApiKey: string;
+  ollamaIp: string;
 }
 
 function loadSettings(): SystemSettings {
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const data = fs.readFileSync(SETTINGS_FILE, "utf-8");
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      // Migrate older settings format if needed
+      return {
+        selectedModel: parsed.selectedModel || "qwen3-coder:latest",
+        selectedProvider: parsed.selectedProvider || "ollama",
+        googleApiKey: parsed.googleApiKey || "",
+        anthropicApiKey: parsed.anthropicApiKey || "",
+        openaiApiKey: parsed.openaiApiKey || "",
+        ollamaIp: parsed.ollamaIp || "http://localhost:11434"
+      };
     }
   } catch (e) {
     console.error("Failed to load settings:", e);
   }
   return {
-    selectedModel: "gemini-3.5-flash"
+    selectedModel: "qwen3-coder:latest",
+    selectedProvider: "ollama",
+    googleApiKey: "",
+    anthropicApiKey: "",
+    openaiApiKey: "",
+    ollamaIp: "http://localhost:11434"
   };
 }
 
@@ -91,6 +110,32 @@ function saveSettings(settings: SystemSettings) {
   } catch (e) {
     console.error("Failed to save settings:", e);
   }
+}
+
+// Calculate cost based on provider rates
+function calculateLlmCost(promptTokens: number, completionTokens: number): { inputCost: number, outputCost: number, totalCost: number, inputRate: number, outputRate: number } {
+  const settings = loadSettings();
+  const provider = settings.selectedProvider || "google";
+  
+  let inputRate = 0.075;
+  let outputRate = 0.30;
+  
+  if (provider === "anthropic") {
+    inputRate = 3.00;
+    outputRate = 15.00;
+  } else if (provider === "openai") {
+    inputRate = 5.00;
+    outputRate = 15.00;
+  } else if (provider === "ollama") {
+    inputRate = 0.0;
+    outputRate = 0.0;
+  }
+  
+  const inputCost = Number(((promptTokens * inputRate) / 1000000).toFixed(6));
+  const outputCost = Number(((completionTokens * outputRate) / 1000000).toFixed(6));
+  const totalCost = Number((inputCost + outputCost).toFixed(6));
+  
+  return { inputCost, outputCost, totalCost, inputRate, outputRate };
 }
 
 // Authentication and role authorization middlewares
@@ -238,17 +283,22 @@ app.get("/api/admin/settings", authMiddleware, requireRole(["admin"]), (req: Req
 });
 
 app.post("/api/admin/settings", authMiddleware, requireRole(["admin"]), (req: Request, res: Response) => {
-  const { selectedModel } = req.body;
-  if (!selectedModel) {
-    return res.status(400).json({ error: "selectedModel is required" });
+  const { selectedModel, selectedProvider, googleApiKey, anthropicApiKey, openaiApiKey, ollamaIp } = req.body;
+  if (!selectedModel || !selectedProvider) {
+    return res.status(400).json({ error: "selectedModel and selectedProvider are required" });
   }
   
   const settings = loadSettings();
   settings.selectedModel = selectedModel;
+  settings.selectedProvider = selectedProvider;
+  settings.googleApiKey = googleApiKey !== undefined ? googleApiKey : settings.googleApiKey;
+  settings.anthropicApiKey = anthropicApiKey !== undefined ? anthropicApiKey : settings.anthropicApiKey;
+  settings.openaiApiKey = openaiApiKey !== undefined ? openaiApiKey : settings.openaiApiKey;
+  settings.ollamaIp = ollamaIp !== undefined ? ollamaIp : settings.ollamaIp;
   saveSettings(settings);
 
-  console.log(`[AdminSettings] Updated selected AI model to: ${selectedModel}`);
-  res.json({ success: true, message: `System AI model updated to ${selectedModel}` });
+  console.log(`[AdminSettings] Updated selected settings: model=${selectedModel}, provider=${selectedProvider}`);
+  res.json({ success: true, message: `System AI settings updated successfully.` });
 });
 
 // REST: Admin - Create Company (Tenant)
@@ -417,7 +467,7 @@ ${content}`
   }
 }
 
-// Helper function to retry Gemini API calls with exponential backoff if they fail
+// Helper function to retry LLM API calls with exponential backoff if they fail
 async function callGeminiWithRetry(
   apiKey: string,
   model: string,
@@ -429,61 +479,136 @@ async function callGeminiWithRetry(
   useCache: boolean = true,
   initialDelayMs: number = 3000
 ): Promise<any> {
-  const cacheKey = `${model}:${systemPrompt}:${userPrompt}`;
+  const settings = loadSettings();
+  const provider = settings.selectedProvider || "google";
+  let activeModel = model;
+
+  const cacheKey = `${provider}:${activeModel}:${systemPrompt}:${userPrompt}`;
   if (useCache && agentResponseCache.has(cacheKey)) {
     const cachedResponse = agentResponseCache.get(cacheKey);
     await addLog(
       agentName,
-      `[Cache Hit] Serving cached response for ${agentName} (avoided duplicate Gemini call).`,
+      `[Cache Hit] Serving cached response for ${agentName} (avoided duplicate LLM call).`,
       "success"
     );
     return cachedResponse;
   }
 
   let attempt = 0;
-  let activeModel = model;
-  
-  // Enforce Gemini model mapping
-  if (activeModel.startsWith("claude-")) {
-    activeModel = "gemini-3.5-flash";
-  }
 
   while (true) {
     if (cancelledRuns.has(projectId)) {
       throw new Error("SWARM_CANCELLED");
     }
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${apiKey}`;
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: userPrompt }]
-            }
-          ],
-          systemInstruction: {
-            parts: [{ text: systemPrompt }]
+      let resultText = "";
+      let inputTokens = 0;
+      let outputTokens = 0;
+
+      if (provider === "google") {
+        const googleKey = settings.googleApiKey || apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${googleKey}`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            generationConfig: { temperature: 0.2 }
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Google API returned status ${response.status}: ${errorText}`);
+        }
+        const data = await response.json() as any;
+        resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        inputTokens = data.usageMetadata?.promptTokenCount || 0;
+        outputTokens = data.usageMetadata?.candidatesTokenCount || 0;
+
+      } else if (provider === "anthropic") {
+        const anthropicKey = settings.anthropicApiKey || process.env.ANTHROPIC_API_KEY || "";
+        const url = `https://api.anthropic.com/v1/messages`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": anthropicKey,
+            "anthropic-version": "2023-06-01"
           },
-          generationConfig: {
+          body: JSON.stringify({
+            model: activeModel,
+            max_tokens: 4096,
+            system: systemPrompt,
+            messages: [{ role: "user", content: userPrompt }],
             temperature: 0.2
-          }
-        })
-      });
+          })
+        });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Google API returned status ${response.status}: ${errorText}`);
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Anthropic API returned status ${response.status}: ${errorText}`);
+        }
+        const data = await response.json() as any;
+        resultText = data.content?.[0]?.text || "";
+        inputTokens = data.usage?.input_tokens || 0;
+        outputTokens = data.usage?.output_tokens || 0;
+
+      } else if (provider === "openai") {
+        const openaiKey = settings.openaiApiKey || process.env.OPENAI_API_KEY || "";
+        const url = `https://api.openai.com/v1/chat/completions`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${openaiKey}`
+          },
+          body: JSON.stringify({
+            model: activeModel,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt }
+            ],
+            temperature: 0.2
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`OpenAI API returned status ${response.status}: ${errorText}`);
+        }
+        const data = await response.json() as any;
+        resultText = data.choices?.[0]?.message?.content || "";
+        inputTokens = data.usage?.prompt_tokens || 0;
+        outputTokens = data.usage?.completion_tokens || 0;
+
+      } else if (provider === "ollama") {
+        const ollamaBaseUrl = settings.ollamaIp || "http://localhost:11434";
+        const url = `${ollamaBaseUrl}/api/chat`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: activeModel,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt }
+            ],
+            options: { temperature: 0.2 },
+            stream: false
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Ollama returned status ${response.status}: ${errorText}`);
+        }
+        const data = await response.json() as any;
+        resultText = data.message?.content || "";
+        inputTokens = data.prompt_eval_count || 0;
+        outputTokens = data.eval_count || 0;
       }
-
-      const data = await response.json() as any;
-      const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      const inputTokens = data.usageMetadata?.promptTokenCount || 0;
-      const outputTokens = data.usageMetadata?.candidatesTokenCount || 0;
 
       const mapped = {
         content: [{ text: resultText }],
@@ -493,7 +618,6 @@ async function callGeminiWithRetry(
         }
       };
 
-      // Save response to cache
       agentResponseCache.set(cacheKey, mapped);
       return mapped;
     } catch (err: any) {
@@ -503,8 +627,8 @@ async function callGeminiWithRetry(
       attempt++;
       const errorMessage = err.message || JSON.stringify(err);
 
-      // Self-healing: if model returns 404, fallback to gemini-1.5-flash
-      if (errorMessage.includes("404") && activeModel !== "gemini-1.5-flash") {
+      // Self-healing fallback only applicable for Google Gemini model names
+      if (provider === "google" && errorMessage.includes("404") && activeModel !== "gemini-1.5-flash") {
         await addLog(
           agentName,
           `Model ${activeModel} not found (404). Reverting to verified Gemini stable (gemini-1.5-flash)...`,
@@ -516,12 +640,12 @@ async function callGeminiWithRetry(
 
       await addLog(
         agentName,
-        `Gemini API request failed (Attempt ${attempt}): ${errorMessage.substring(0, 120)}. Retrying...`,
+        `${provider.toUpperCase()} API request failed (Attempt ${attempt}): ${errorMessage.substring(0, 120)}. Retrying...`,
         "warning"
       );
 
       if (attempt >= 5) {
-        throw new Error(`Gemini API failed after 5 attempts. Last error: ${errorMessage}`);
+        throw new Error(`${provider.toUpperCase()} API failed after 5 attempts. Last error: ${errorMessage}`);
       }
 
       const backoffDelay = Math.min(initialDelayMs * Math.pow(2, attempt - 1), 30000);
@@ -611,7 +735,7 @@ async function runAgentPipeline(
         if (!pTokens || !cTokens) return;
         accumPromptTokens += pTokens;
         accumCompletionTokens += cTokens;
-        const costUSD = (accumPromptTokens * 0.075 / 1000000) + (accumCompletionTokens * 0.30 / 1000000);
+        const costUSD = calculateLlmCost(accumPromptTokens, accumCompletionTokens).totalCost;
         await prisma.agentRun.update({
           where: { id: projectId },
           data: {
@@ -1715,9 +1839,12 @@ async function traceLlmCall(
 ) {
   if (!process.env.LANGCHAIN_API_KEY) return;
   try {
-    const costUSD = (promptTokens !== undefined && completionTokens !== undefined)
-      ? Number(((promptTokens * 0.075 / 1000000) + (completionTokens * 0.30 / 1000000)).toFixed(6))
-      : 0;
+    const settings = loadSettings();
+    const activeModel = settings.selectedModel || "gemini-3.5-flash";
+    const pricing = (promptTokens !== undefined && completionTokens !== undefined)
+      ? calculateLlmCost(promptTokens, completionTokens)
+      : { totalCost: 0, inputCost: 0, outputCost: 0, inputRate: 0, outputRate: 0 };
+    const costUSD = pricing.totalCost;
 
     const runTree = new RunTree({
       name: `${agentName} Decision`,
@@ -1726,21 +1853,21 @@ async function traceLlmCall(
       project_name: process.env.LANGCHAIN_PROJECT || "valkyrie",
       extra: {
         metadata: {
-          model: "gemini-3.5-flash",
+          model: activeModel,
           prompt_tokens: promptTokens || 0,
           completion_tokens: completionTokens || 0,
           total_tokens: (promptTokens || 0) + (completionTokens || 0),
           cost_usd: costUSD,
           rates: {
-            input_usd_per_million: 0.075,
-            output_usd_per_million: 0.30
+            input_usd_per_million: pricing.inputRate,
+            output_usd_per_million: pricing.outputRate
           },
           usage_metadata: {
             input_tokens: promptTokens || 0,
             output_tokens: completionTokens || 0,
             total_tokens: (promptTokens || 0) + (completionTokens || 0),
-            input_cost: Number(((promptTokens || 0) * 0.075 / 1000000).toFixed(6)),
-            output_cost: Number(((completionTokens || 0) * 0.30 / 1000000).toFixed(6)),
+            input_cost: pricing.inputCost,
+            output_cost: pricing.outputCost,
             total_cost: costUSD
           }
         }

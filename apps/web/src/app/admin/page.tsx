@@ -49,7 +49,12 @@ export default function AdminDashboard() {
   const [user, setUser] = useState<UserSession | null>(null);
   const [apiKey, setApiKey] = useState("valk_live_8f3d...9c2d");
   const [gitStatus] = useState("Connected (GitHub App)");
-  const [selectedModel, setSelectedModel] = useState("gemini-3.5-flash");
+  const [selectedModel, setSelectedModel] = useState("qwen3-coder:latest");
+  const [selectedProvider, setSelectedProvider] = useState("ollama");
+  const [googleApiKey, setGoogleApiKey] = useState("");
+  const [anthropicApiKey, setAnthropicApiKey] = useState("");
+  const [openaiApiKey, setOpenaiApiKey] = useState("");
+  const [ollamaIp, setOllamaIp] = useState("http://localhost:11434");
   const [settingsLoading, setSettingsLoading] = useState(false);
 
   // Companies and Users state
@@ -124,6 +129,11 @@ export default function AdminDashboard() {
       if (response.ok) {
         const data = await response.json();
         setSelectedModel(data.selectedModel);
+        setSelectedProvider(data.selectedProvider || "ollama");
+        setGoogleApiKey(data.googleApiKey || "");
+        setAnthropicApiKey(data.anthropicApiKey || "");
+        setOpenaiApiKey(data.openaiApiKey || "");
+        setOllamaIp(data.ollamaIp || "http://localhost:11434");
       }
     } catch (err) {
       console.error("Error fetching settings:", err);
@@ -168,16 +178,23 @@ export default function AdminDashboard() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({ selectedModel })
+        body: JSON.stringify({
+          selectedModel,
+          selectedProvider,
+          googleApiKey,
+          anthropicApiKey,
+          openaiApiKey,
+          ollamaIp
+        })
       });
       if (response.ok) {
-        alert("System AI Swarm Model updated successfully to: " + selectedModel);
+        alert("System AI Swarm settings updated successfully!");
       } else {
         const data = await response.json();
-        alert(data.error || "Failed to update model settings.");
+        alert(data.error || "Failed to update settings.");
       }
     } catch (err) {
-      console.error("Error saving model settings:", err);
+      console.error("Error saving settings:", err);
       alert("Error saving settings.");
     } finally {
       setSettingsLoading(false);
@@ -414,28 +431,104 @@ export default function AdminDashboard() {
         {/* AI Global Configuration Section */}
         <section className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm shadow-xl">
           <h2 className="text-xl font-bold text-slate-100 mb-2">Swarm AI Engine Configurations</h2>
-          <p className="text-slate-400 text-sm mb-6">Select which AI LLM model to deploy when triggering multi-agent pipeline debate runs.</p>
+          <p className="text-slate-400 text-sm mb-6">Select which AI LLM model and provider to deploy when triggering multi-agent pipeline debate runs.</p>
 
-          <form onSubmit={handleModelChange} className="flex flex-col sm:flex-row items-end gap-4 max-w-2xl">
-            <div className="flex-1 w-full">
-              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Selected LLM Model</label>
-              <select
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors font-mono"
-              >
-                <option value="gemini-3.5-flash">gemini-3.5-flash (Gemini 3.5 Flash Default)</option>
-                <option value="gemini-2.0-flash">gemini-2.0-flash (Gemini 2.0 Flash)</option>
-                <option value="gemini-1.5-flash">gemini-1.5-flash (Gemini 1.5 Flash)</option>
-              </select>
+          <form onSubmit={handleModelChange} className="space-y-6 max-w-4xl">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">AI Provider</label>
+                <select
+                  value={selectedProvider}
+                  onChange={(e) => {
+                    const prov = e.target.value;
+                    setSelectedProvider(prov);
+                    if (prov === "google") setSelectedModel("gemini-3.5-flash");
+                    else if (prov === "anthropic") setSelectedModel("claude-3-5-sonnet-20241022");
+                    else if (prov === "openai") setSelectedModel("gpt-4o-mini");
+                    else if (prov === "ollama") setSelectedModel("qwen3-coder:latest");
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors"
+                >
+                  <option value="ollama">Ollama (Local Swarm Inference)</option>
+                  <option value="google">Google Gemini API</option>
+                  <option value="anthropic">Anthropic Claude API</option>
+                  <option value="openai">OpenAI GPT API</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Active LLM Model</label>
+                <input
+                  type="text"
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  placeholder="e.g. qwen3-coder:latest"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors font-mono"
+                />
+              </div>
             </div>
-            <button
-              type="submit"
-              disabled={settingsLoading}
-              className="px-6 py-2.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-bold transition-all shadow-md shadow-indigo-500/10 disabled:opacity-50 text-sm h-11 flex items-center justify-center"
-            >
-              {settingsLoading ? "Saving..." : "Update Global Model"}
-            </button>
+
+            {selectedProvider !== "ollama" ? (
+              <div className="grid grid-cols-1 gap-4">
+                {selectedProvider === "google" && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Google API Key</label>
+                    <input
+                      type="password"
+                      value={googleApiKey}
+                      onChange={(e) => setGoogleApiKey(e.target.value)}
+                      placeholder="AIzaSy..."
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors font-mono"
+                    />
+                  </div>
+                )}
+                {selectedProvider === "anthropic" && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Anthropic API Key</label>
+                    <input
+                      type="password"
+                      value={anthropicApiKey}
+                      onChange={(e) => setAnthropicApiKey(e.target.value)}
+                      placeholder="sk-ant-..."
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors font-mono"
+                    />
+                  </div>
+                )}
+                {selectedProvider === "openai" && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">OpenAI API Key</label>
+                    <input
+                      type="password"
+                      value={openaiApiKey}
+                      onChange={(e) => setOpenaiApiKey(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors font-mono"
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Ollama Connection Endpoint (IP/Domain)</label>
+                <input
+                  type="text"
+                  value={ollamaIp}
+                  onChange={(e) => setOllamaIp(e.target.value)}
+                  placeholder="http://localhost:11434"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors font-mono"
+                />
+              </div>
+            )}
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={settingsLoading}
+                className="px-6 py-2.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-bold transition-all shadow-md shadow-indigo-500/10 disabled:opacity-50 text-sm h-11 flex items-center justify-center"
+              >
+                {settingsLoading ? "Saving Settings..." : "Save AI Swarm Settings"}
+              </button>
+            </div>
           </form>
         </section>
 
