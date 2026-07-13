@@ -32,20 +32,23 @@ function loadDotenv(filePath: string) {
 loadDotenv(path.join(__dirname, "../../../.env"));
 
 const args = process.argv.slice(2);
-const projectIdIndex = args.indexOf("--project");
-const projectId = projectIdIndex !== -1 ? args[projectIdIndex + 1] : "proj-1";
-const orchestratorUrl = process.env.ORCHESTRATOR_URL || "http://localhost:4000";
+const isMcp = args.includes("--mcp");
+export const projectIdIndex = args.indexOf("--project");
+export const projectId = projectIdIndex !== -1 ? args[projectIdIndex + 1] : "proj-1";
+export const orchestratorUrl = process.env.ORCHESTRATOR_URL || "http://localhost:4000";
 
-console.log(`===============================================`);
-console.log(` Valkyrie Local QA Runner CLI & AI QA Agent v1.0.0`);
-console.log(` Target Project: ${projectId}`);
-console.log(` Central Orchestrator: ${orchestratorUrl}`);
-console.log(`===============================================`);
+if (!isMcp) {
+  console.log(`===============================================`);
+  console.log(` Valkyrie Local QA Runner CLI & AI QA Agent v1.0.0`);
+  console.log(` Target Project: ${projectId}`);
+  console.log(` Central Orchestrator: ${orchestratorUrl}`);
+  console.log(`===============================================`);
+}
 
 // Helper to post JSON report
-function sendReport(passed: boolean, logs: string[], errors: string[]) {
+export function sendReport(projId: string, passed: boolean, logs: string[], errors: string[]) {
   const payload = JSON.stringify({ passed, logs, errors });
-  const url = new URL(`${orchestratorUrl}/api/projects/${projectId}/qa-report`);
+  const url = new URL(`${orchestratorUrl}/api/projects/${projId}/qa-report`);
   
   const req = http.request({
     hostname: url.hostname,
@@ -74,9 +77,9 @@ function sendReport(passed: boolean, logs: string[], errors: string[]) {
 }
 
 // Download files from orchestrator REST endpoint
-function downloadWorkspaceFiles(): Promise<Array<{ name: string; content: string }>> {
+export function downloadWorkspaceFiles(projId: string = projectId): Promise<Array<{ name: string; content: string }>> {
   return new Promise((resolve, reject) => {
-    const url = `${orchestratorUrl}/api/projects/${projectId}/files`;
+    const url = `${orchestratorUrl}/api/projects/${projId}/files`;
     
     http.get(url, (res) => {
       if (res.statusCode !== 200) {
@@ -161,7 +164,7 @@ async function traceQALlmCall(
 }
 
 // Invoke Gemini API to write actual unit assertions for the code
-async function generateAIAssertions(files: Array<{ name: string; content: string }>, testFilename: string, ext: string): Promise<string> {
+export async function generateAIAssertions(files: Array<{ name: string; content: string }>, testFilename: string, ext: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     console.warn("[QA Agent] GEMINI_API_KEY is missing. Skipping AI QA testing suite generation.");
@@ -241,7 +244,7 @@ Output ONLY the raw code inside a markdown code block (between \`\`\`${ext === "
 }
 
 // Verify that the application can start up and run without crashing
-function verifyApplicationStartup(sandboxDir: string, mainFilename: string, hasUv: boolean): Promise<{ success: boolean, logs: string[], errorMsg: string }> {
+export function verifyApplicationStartup(sandboxDir: string, mainFilename: string, hasUv: boolean): Promise<{ success: boolean, logs: string[], errorMsg: string }> {
   return new Promise(async (resolve) => {
     let command = "";
     if (mainFilename.endsWith(".js")) {
@@ -314,10 +317,10 @@ let fixAttempts = 0;
 const MAX_FIX_ATTEMPTS = 3;
 
 // Poll status helper
-function pollForStatus(expectedStatus: string): Promise<void> {
+export function pollForStatus(expectedStatus: string, projId: string = projectId): Promise<void> {
   return new Promise((resolve) => {
     const interval = setInterval(() => {
-      const url = `${orchestratorUrl}/api/projects/${projectId}/status`;
+      const url = `${orchestratorUrl}/api/projects/${projId}/status`;
       http.get(url, (res) => {
         if (res.statusCode === 200) {
           let rawData = "";
@@ -373,7 +376,7 @@ async function executeQA() {
         console.error(`\n❌ QA Runner: Application failed to start!`);
         console.error(startupResult.errorMsg);
         
-        sendReport(false, startupResult.logs, [startupResult.errorMsg]);
+        sendReport(projectId, false, startupResult.logs, [startupResult.errorMsg]);
         
         if (fixAttempts >= MAX_FIX_ATTEMPTS) {
           console.error(`\n❌ QA Runner: Exceeded maximum fix attempts (${MAX_FIX_ATTEMPTS}). Halting self-healing loop.`);
@@ -394,7 +397,7 @@ async function executeQA() {
     const testFile = files.find(f => f.name.startsWith("test."));
     if (!testFile) {
       console.log("No test script file found in generation workspace.");
-      sendReport(true, ["No test scripts found. Scaffolding marked successful."], []);
+      sendReport(projectId, true, ["No test scripts found. Scaffolding marked successful."], []);
       return;
     }
 
@@ -451,7 +454,7 @@ async function executeQA() {
         console.error(`\n❌ QA Suite Failure reported!`);
         console.error(stderr || error.message);
         errors.push(error.message);
-        sendReport(false, logs, errors);
+        sendReport(projectId, false, logs, errors);
 
         if (fixAttempts >= MAX_FIX_ATTEMPTS) {
           console.error(`\n❌ QA Runner: Exceeded maximum fix attempts (${MAX_FIX_ATTEMPTS}). Halting self-healing loop.`);
@@ -467,7 +470,7 @@ async function executeQA() {
       } else {
         console.log(`\n✅ QA Suite Success! All assertions verified.`);
         console.log(stdout);
-        sendReport(true, logs, errors);
+        sendReport(projectId, true, logs, errors);
       }
     });
 
@@ -476,4 +479,11 @@ async function executeQA() {
   }
 }
 
-executeQA();
+if (!isMcp) {
+  executeQA();
+} else {
+  // Start the lightweight MCP server inside the QA Runner package
+  import("./mcp").then((mcp) => {
+    mcp.startMcpServer();
+  });
+}

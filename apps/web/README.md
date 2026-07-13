@@ -1,36 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Valkyrie Telemetry & Operations Dashboard
 
-## Getting Started
+This is the Next.js frontend application for Valkyrie. It provides developer interfaces to create projects, monitor active agent logs, track LLM execution costs, manage company directories, and restart runs.
 
-First, run the development server:
+---
 
+## 🎨 Dashboard Interfaces
+
+### 🏠 Swarm Projects Directory (`/dashboard`)
+* Lists all project profiles linked to the user's tenant organization.
+* **Project Creator**: Configures names, descriptions, caching preferences, and VCS repository routes.
+* **VCS Integration**: Selects PAT (Personal Access Token) or GitHub App authentication (requires Installation ID configuration).
+
+### 🚀 Swarm Run Telemetry (`/project/[id]/run`)
+* **Milestone Monitor**: Shows live progress indicators for agent steps:
+  `System -> PM -> Architect -> Data Architect -> UI/UX -> Developer -> Security Architect -> Tech Writer -> QA`
+* **Console Terminal**: Streams Server-Sent Event (SSE) agent print statements.
+* **Action Header**: Restart swarm jobs, cancel running jobs, and toggle caching variables.
+* **Token Costs Tracker**: Renders real-time Gemini token metrics and cost estimations.
+
+### 🔒 Administration Panel (`/admin`)
+* Restricted to Admin users.
+* **Company Profiles Builder**: Provisions tenant organizations (Company ID slug parameter).
+* **Users Creator**: Configures users, company bindings, and RBAC roles.
+* **Telemetry Explorer**: Inspects projects associated with selected companies and calculates total LLM usage statistics.
+
+---
+
+## 🔐 Auth & Role-Based Access Control (RBAC)
+
+### Passwordless Username OAuth Flow
+Users log in by entering their username at `/login`. The system issues a JWT containing user details:
+* Username containing `admin` -> Assumes `admin` role.
+* Username containing `viewer` -> Assumes `viewer` role.
+* All other usernames -> Assumes `user` role.
+
+### RBAC Enforcement matrix:
+* **Viewer**: Read-only access. Telemetry and dashboards are visible, but run creation, swarm starts, restarts, cancellations, and administration menus are disabled.
+* **User**: Standard developer access. Allowed to create, delete, and configure projects under their company namespace. Admin panel is blocked.
+* **Admin**: Complete system clearance. Able to provision companies, invite users, access analytics, and manage all projects.
+
+---
+
+## 🚀 Execution Instructions
+
+Run the server independently:
 ```bash
+# Start development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+By default, the server boots on port `3000`.
