@@ -245,7 +245,7 @@ async function handleToolCall(name: string, args: any): Promise<any> {
     }
 
     const ext = testFile.name.endsWith(".js") ? "js" : "py";
-    const aiTestContent = await generateAIAssertions(files, testFile.name, ext);
+    const aiTestContent = await generateAIAssertions(files, testFile.name, ext, projectId);
     if (aiTestContent) {
       const testFilePath = path.join(sandboxDir, testFile.name);
       fs.writeFileSync(testFilePath, aiTestContent);

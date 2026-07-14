@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 interface LogMessage {
@@ -26,6 +26,8 @@ export default function RunPipeline() {
   const { id } = useParams();
   const [useCache, setUseCache] = useState(true);
   const [user, setUser] = useState<UserSession | null>(null);
+  
+  const logsEndRef = useRef<HTMLDivElement | null>(null);
 
   const getSession = (): UserSession | null => {
     if (typeof window === "undefined") return null;
@@ -130,6 +132,10 @@ export default function RunPipeline() {
       type: "info",
     },
   ]);
+
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs]);
 
   useEffect(() => {
     // Set active mount time on client
@@ -326,6 +332,7 @@ export default function RunPipeline() {
                 </p>
               </div>
             ))}
+            <div ref={logsEndRef} />
           </div>
         </section>
 

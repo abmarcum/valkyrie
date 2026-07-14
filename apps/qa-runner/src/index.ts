@@ -164,13 +164,12 @@ async function traceQALlmCall(
 }
 
 // Invoke Gemini API to write actual unit assertions for the code
-export async function generateAIAssertions(files: Array<{ name: string; content: string }>, testFilename: string, ext: string): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    console.warn("[QA Agent] GEMINI_API_KEY is missing. Skipping AI QA testing suite generation.");
-    return "";
-  }
-
+export async function generateAIAssertions(
+  files: Array<{ name: string; content: string }>, 
+  testFilename: string, 
+  ext: string,
+  projId: string = projectId
+): Promise<string> {
   const codeFiles = files.filter(f => {
     const name = f.name.toLowerCase();
     return !name.startsWith("test.") && !name.startsWith("docs/") && !name.endsWith(".md") && !name.endsWith(".sql");
@@ -191,37 +190,27 @@ For Python, write tests using python's built-in 'unittest' module and execute th
 For JavaScript, write native node assertions and execute them.
 Output ONLY the raw code inside a markdown code block (between \`\`\`${ext === "js" ? "javascript" : "python"} and \`\`\`). No explanations, no conversation.`;
 
-  console.log(`[QA Agent] Querying Gemini API (gemini-3.5-flash) to analyze code and generate assertions...`);
+  console.log(`[QA Agent] Querying Orchestrator LLM Proxy to analyze code and generate assertions...`);
 
   try {
-    const model = "gemini-3.5-flash";
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const url = `${orchestratorUrl}/api/projects/${projId}/llm`;
     const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: codebasePrompt }]
-          }
-        ],
-        systemInstruction: {
-          parts: [{ text: "You are a professional software QA automation engineer agent." }]
-        },
-        generationConfig: {
-          temperature: 0.2
-        }
+        systemPrompt: "You are a professional software QA automation engineer agent.",
+        userPrompt: codebasePrompt,
+        agentName: "QA Engineer (Runner)"
       })
     });
 
     if (response.ok) {
       const data = await response.json() as any;
-      const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      const inputTokens = data.usageMetadata?.promptTokenCount || 0;
-      const outputTokens = data.usageMetadata?.candidatesTokenCount || 0;
+      const responseText = data.text || "";
+      const inputTokens = data.inputTokens || 0;
+      const outputTokens = data.outputTokens || 0;
 
       // Log execution trace back to LangSmith API
       await traceQALlmCall("QA Engineer (Runner)", codebasePrompt, responseText, inputTokens, outputTokens);
@@ -235,10 +224,10 @@ Output ONLY the raw code inside a markdown code block (between \`\`\`${ext === "
       return responseText.replace(/```[a-z]*\n/gi, "").replace(/```/g, "").trim();
     } else {
       const errText = await response.text();
-      console.error("[QA Agent] Gemini API call failed:", errText);
+      console.error("[QA Agent] Orchestrator LLM proxy failed:", errText);
     }
   } catch (err: any) {
-    console.error("[QA Agent] Error communicating with Gemini API:", err.message);
+    console.error("[QA Agent] Error contacting LLM proxy:", err.message);
   }
   return "";
 }
@@ -267,7 +256,13 @@ export function verifyApplicationStartup(sandboxDir: string, mainFilename: strin
     }
 
     console.log(`[QA Runner] Startup test command: ${command}`);
-    const proc = exec(command, { cwd: sandboxDir });
+    const proc = exec(command, {
+      cwd: sandboxDir,
+      env: {
+        ...process.env,
+        PYTHONPATH: sandboxDir
+      }
+    });
     
     let stdoutData = "";
     let stderrData = "";
@@ -314,7 +309,32 @@ export function verifyApplicationStartup(sandboxDir: string, mainFilename: strin
 }
 
 let fixAttempts = 0;
-const MAX_FIX_ATTEMPTS = 3;
+const MAX_FIX_ATTEMPTS = 8;
+
+// Fetch current project status from the orchestrator
+export function fetchProjectStatus(projId: string = projectId): Promise<string> {
+  return new Promise((resolve) => {
+    const url = `${orchestratorUrl}/api/projects/${projId}/status`;
+    http.get(url, (res) => {
+      if (res.statusCode === 200) {
+        let rawData = "";
+        res.on("data", (chunk) => { rawData += chunk; });
+        res.on("end", () => {
+          try {
+            const data = JSON.parse(rawData);
+            resolve(data.status || "");
+          } catch (e) {
+            resolve("");
+          }
+        });
+      } else {
+        resolve("");
+      }
+    }).on("error", () => {
+      resolve("");
+    });
+  });
+}
 
 // Poll status helper
 export function pollForStatus(expectedStatus: string, projId: string = projectId): Promise<void> {
@@ -346,11 +366,28 @@ export function pollForStatus(expectedStatus: string, projId: string = projectId
 async function executeQA() {
   try {
     console.log(`\n[1/3] Downloading generated codebase files...`);
-    const files = await downloadWorkspaceFiles();
-    
-    if (files.length === 0) {
-      console.log(`No files generated yet. Check if orchestrator completed generation.`);
-      return;
+    let files = await downloadWorkspaceFiles();
+    let testFile = files.find(f => f.name.startsWith("test."));
+
+    if (files.length === 0 || !testFile) {
+      console.log(`[QA Runner] Test plan/script file not found in sandbox files.`);
+      while (files.length === 0 || !testFile) {
+        const currentStatus = await fetchProjectStatus(projectId);
+        
+        // If the execution has finished or was cancelled, we stop waiting
+        if (currentStatus === "SUCCESS" || currentStatus === "FAILED" || currentStatus === "CANCELLED") {
+          console.log(`[QA Runner] Pipeline execution ended with status: ${currentStatus} without generating a test plan.`);
+          sendReport(projectId, true, ["No test scripts found. Pipeline ended."], []);
+          return;
+        }
+
+        console.log(`[QA Runner] Awaiting creation of test plan/script file... (Current status: ${currentStatus || "unknown"})`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        
+        files = await downloadWorkspaceFiles();
+        testFile = files.find(f => f.name.startsWith("test."));
+      }
+      console.log(`[QA Runner] Test plan/script found: ${testFile.name}. Proceeding to local testing sandbox...`);
     }
 
     // Prepare local sandbox folder
@@ -394,12 +431,6 @@ async function executeQA() {
     }
 
     console.log(`[3/3] Locating and executing test script assertions...`);
-    const testFile = files.find(f => f.name.startsWith("test."));
-    if (!testFile) {
-      console.log("No test script file found in generation workspace.");
-      sendReport(projectId, true, ["No test scripts found. Scaffolding marked successful."], []);
-      return;
-    }
 
     const ext = testFile.name.endsWith(".js") ? "js" : "py";
     const aiTestContent = await generateAIAssertions(files, testFile.name, ext);
@@ -434,7 +465,38 @@ async function executeQA() {
 
     console.log(`Executing QA command: ${command}`);
 
-    exec(command, { cwd: sandboxDir }, async (error, stdout, stderr) => {
+    let child: any = null;
+    let isRestarting = false;
+    const testFilePath = path.join(sandboxDir, testFile.name);
+
+    const fileWatcher = fs.watch(testFilePath, (eventType) => {
+      if (eventType === "change" && !isRestarting) {
+        console.log(`\n[QA Runner] Detect update to test plan file: ${testFile.name}. Restarting test plan...`);
+        isRestarting = true;
+        if (child) {
+          try {
+            child.kill("SIGTERM");
+          } catch (e) {}
+        }
+        fileWatcher.close();
+        setTimeout(() => {
+          executeQA();
+        }, 1000);
+      }
+    });
+
+    child = exec(command, {
+      cwd: sandboxDir,
+      env: {
+        ...process.env,
+        PYTHONPATH: sandboxDir
+      }
+    }, async (error, stdout, stderr) => {
+      if (isRestarting) {
+        return;
+      }
+      fileWatcher.close();
+
       const logs = stdout.split("\n").filter(Boolean);
       const errors = stderr.split("\n").filter(Boolean);
 

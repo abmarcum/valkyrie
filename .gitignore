@@ -9,4 +9,4 @@ build
 *.db-journal
 generated/
 sandbox/
-.turbo/
+**/.turbo/

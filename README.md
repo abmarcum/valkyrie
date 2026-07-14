@@ -1,6 +1,6 @@
 # Valkyrie: Autonomous Swarm-Driven Codebase Builder & Telemetry
 
-Valkyrie is an autonomous AI agent swarm platform designed to specify, build, verify, audit, and deploy production-grade software applications. Powered by **Google Gemini 3.5 Flash**, Valkyrie coordinates specialized agents through a rigorous generation and self-correcting validation lifecycle.
+Valkyrie is an autonomous AI agent swarm platform designed to specify, build, verify, audit, and deploy production-grade software applications. Powered by a provider-agnostic engine, Valkyrie supports **Google Gemini**, **Anthropic Claude**, **OpenAI GPT**, and local **Ollama** models (defaulting to Ollama `qwen3-coder:latest`), coordinating specialized agents through a rigorous generation and self-correcting validation lifecycle.
 
 ---
 
@@ -10,7 +10,7 @@ Valkyrie is structured as a TypeScript monorepo containing the following compone
 
 ```
 ├── apps/
-│   ├── orchestrator/       # Express server managing the LLM swarm pipelines & Git pushes
+│   ├── orchestrator/       # Express server managing the LLM swarm pipelines, Git pushes & LLM proxying
 │   ├── qa-runner/          # Local QA executor CLI, Docker wrapper, & Model Context Protocol (MCP) server
 │   └── web/                # Next.js telemetry dashboard, project milestones, & admin panel
 ├── packages/
@@ -48,12 +48,26 @@ When a project run is initiated, the orchestrator triggers the agent pipeline se
 [Security Architect] (OWASP Top 10 Audit) ─────[If vulnerabilities]─► [Re-develop]
    │
    ▼
-[Tech Writer Agent] (README & API Docs Manuals)
+   ├──► [Immediate Git Commit & push to GitHub]
    │
    ▼
-[QA Engineer (Runner)] (Application Startup Verification & AI Assertion Test Sweeps)
+[Tech Writer Agent] (README & API Docs Manuals) ───► [Secondary Push]
    │
-   └────────────[If tests fail (Self-Healing Loop, Max 3 attempts)]───────────► [Re-develop]
+   ▼
+[QA Engineer (Runner)] (Startup Verification & AI Assertion Test Sweeps)
+   │
+   ├──► [Poller: Waits/retries if test plan does not exist yet]
+   │
+   ├──► [Hot Reload: Restarts test execution if test plan is updated]
+   │
+   └────────────[If tests fail (Self-Healing Loop, Max 8 attempts)]
+                 │
+                 ├──► [Creates GitHub Bug Issue detailing execution failures]
+                 │
+                 ├──► [Developer Agent updates, pushes fix, and closes issue]
+                 │
+                 ▼
+            [Re-develop]
 ```
 
 ---

@@ -301,6 +301,45 @@ app.post("/api/admin/settings", authMiddleware, requireRole(["admin"]), (req: Re
   res.json({ success: true, message: `System AI settings updated successfully.` });
 });
 
+// Proxy LLM requests for local/containerized runners to use the active model & provider settings
+app.post("/api/projects/:id/llm", async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { systemPrompt, userPrompt, agentName } = req.body;
+  if (!systemPrompt || !userPrompt) {
+    return res.status(400).json({ error: "systemPrompt and userPrompt are required." });
+  }
+
+  try {
+    const settings = loadSettings();
+    const targetModel = settings.selectedModel || "gemini-3.5-flash";
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
+
+    const response = await callGeminiWithRetry(
+      apiKey,
+      targetModel,
+      systemPrompt,
+      userPrompt,
+      () => {}, // No-op logger for runner proxy
+      agentName || "QA Runner Agent Proxy",
+      id,
+      false // Do not cache runner assertions
+    );
+
+    const resultText = response.content?.[0]?.text || "";
+    const inputTokens = response.usage?.input_tokens || 0;
+    const outputTokens = response.usage?.output_tokens || 0;
+
+    res.json({
+      text: resultText,
+      inputTokens,
+      outputTokens
+    });
+  } catch (err: any) {
+    console.error("[LLM Proxy Error]:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // REST: Admin - Create Company (Tenant)
 app.post("/api/admin/companies", authMiddleware, requireRole(["admin"]), async (req: Request, res: Response) => {
   const { id, name } = req.body;
@@ -723,12 +762,36 @@ async function runAgentPipeline(
   await addLog("Product Manager", `Starting requirements design. Prompt: "${description}"`);
 
   try {
-    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.ANTHROPIC_API_KEY;
+    const settings = loadSettings();
+    const provider = settings.selectedProvider || "google";
+    const targetModel = settings.selectedModel || "gemini-3.5-flash";
+
+    let hasCredentials = false;
+    let launchMsg = "";
+
+    if (provider === "google") {
+      const googleKey = settings.googleApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+      hasCredentials = !!googleKey;
+      launchMsg = `Google API key detected. Invoking live Google Gemini pipeline with model ${targetModel}...`;
+    } else if (provider === "anthropic") {
+      const anthropicKey = settings.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
+      hasCredentials = !!anthropicKey;
+      launchMsg = `Anthropic API key detected. Invoking live Anthropic Claude pipeline with model ${targetModel}...`;
+    } else if (provider === "openai") {
+      const openaiKey = settings.openaiApiKey || process.env.OPENAI_API_KEY;
+      hasCredentials = !!openaiKey;
+      launchMsg = `OpenAI API key detected. Invoking live OpenAI GPT pipeline with model ${targetModel}...`;
+    } else if (provider === "ollama") {
+      hasCredentials = true; // Ollama runs locally, requires no API key
+      launchMsg = `Ollama connection endpoint detected (${settings.ollamaIp || "http://localhost:11434"}). Invoking local Ollama pipeline with model ${targetModel}...`;
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.ANTHROPIC_API_KEY || "";
     const cohereApiKey = process.env.COHERE_API_KEY;
     const cohereClient = cohereApiKey ? new CohereClient({ token: cohereApiKey }) : null;
 
-    if (apiKey) {
-      await addLog("Product Manager", "Gemini API key detected. Invoking live Gemini 3.5 Flash pipeline...", "info");
+    if (hasCredentials) {
+      await addLog("Product Manager", launchMsg, "info");
       let accumPromptTokens = 0;
       let accumCompletionTokens = 0;
       const updateCost = async (pTokens?: number, cTokens?: number) => {
@@ -1048,6 +1111,11 @@ Output clean, fully functioning, and well-documented source code files, structur
         await addLog("Developer Agent", "Code synthesized. Files saved to disk.", "success");
         completedStatuses.add("GENERATING");
 
+        // Submit the code to GitHub immediately after the Security Architect has completed
+        await addLog("Security Architect", "Security audit completed. Committing and pushing codebase to GitHub...", "info");
+        const initialGitResult = await pushToGithub(projectId, vcsRepo || "");
+        await addLog("Security Architect", `Code pushed to GitHub: ${initialGitResult.message}`, initialGitResult.success ? "success" : "error");
+
         // Live Tech Writer Agent call
         currentStatus = "DOCUMENTING";
         await addLog("Tech Writer", "Generating project documentation manuals and API references...", "info");
@@ -1119,11 +1187,11 @@ Structure each document with path headers (e.g. ## README.md or ## docs/api.md) 
 
       } catch (err: any) {
         if (err.message === "SWARM_CANCELLED") throw err;
-        await addLog("System", `Gemini swarm execution error: ${err.message}. Falling back to scaffolded pipeline.`, "warning");
+        await addLog("System", `Swarm execution error: ${err.message}. Falling back to scaffolded pipeline.`, "warning");
         await fallbackPipeline(projectId, language, addLog, completedStatuses, vcsRepo);
       }
     } else {
-      await addLog("System", "No Gemini/Google API key in environment. Running scaffolded fallback pipelines.", "warning");
+      await addLog("System", "Missing active provider settings or API credentials. Running scaffolded fallback pipelines.", "warning");
       await fallbackPipeline(projectId, language, addLog, completedStatuses, vcsRepo);
     }
 
@@ -1364,16 +1432,11 @@ function writeProjectFiles(projectId: string, language: string, content: string)
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Check for file headers: e.g. "## `path/to/file`" or "## path/to/file"
+    // Check for file headers: e.g. "## `path/to/file`", "## File: path/to/file", etc.
     let matchedPath: string | null = null;
-    const backtickMatch = line.match(/^(?:#{2,4})\s+`([^`]+)`/);
-    if (backtickMatch) {
-      matchedPath = backtickMatch[1];
-    } else {
-      const lineMatch = line.match(/^(?:#{2,4})\s+([^\s#]+)$/);
-      if (lineMatch) {
-        matchedPath = lineMatch[1];
-      }
+    const headerMatch = line.match(/^(?:#+\s*)+(?:File:?\s+|Path:?\s+)?`?([^`\s#]+)`?/i);
+    if (headerMatch) {
+      matchedPath = headerMatch[1];
     }
 
     if (matchedPath) {
@@ -1714,6 +1777,35 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
     const language = run?.project?.programmingLanguage || "typescript";
     writeProjectFiles(projectId, language, codeText || "// Fixed code");
 
+    // Commit and push the code changes to GitHub immediately after Developer Agent fixes code
+    if (run && run.project.vcsRepoUrl) {
+      await addFixLog("Developer Agent", "Committing and pushing self-healing code fixes to GitHub...", "info");
+      const pushResult = await pushToGithub(projectId, run.project.vcsRepoUrl);
+      await addFixLog("Developer Agent", `Fixes pushed to GitHub: ${pushResult.message}`, pushResult.success ? "success" : "error");
+
+      // Scan logs to see if we have a GitHub issue number to update
+      try {
+        const logsArr = JSON.parse(run.logs as string);
+        const issueLog = logsArr.find((l: any) => l.message && l.message.startsWith("Created GitHub Bug Issue #"));
+        if (issueLog) {
+          const match = issueLog.message.match(/#(\d+)/);
+          if (match && match[1]) {
+            const issueNumber = parseInt(match[1], 10);
+            await addFixLog("Developer Agent", `Updating GitHub Bug Issue #${issueNumber}...`, "info");
+            const commentBody = `The Developer Agent has successfully resolved the reported test suite failures and committed the fix in project run ${projectId}.\n\n### Commit Result\n${pushResult.message}`;
+            const updateResult = await updateGithubIssue(projectId, issueNumber, commentBody, "closed");
+            if (updateResult.success) {
+              await addFixLog("Developer Agent", `GitHub Bug Issue #${issueNumber} updated and closed.`, "success");
+            } else {
+              await addFixLog("Developer Agent", `Failed to update GitHub Bug Issue #${issueNumber}: ${updateResult.message}`, "warning");
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error("[ValkyrieFix] Error updating GitHub issue:", err.message);
+      }
+    }
+
     await addFixLog("Developer Agent", "Code fixes successfully applied. File updates committed to workspace. Re-triggering QA runner loop.", "success");
     
     await prisma.agentRun.update({
@@ -1757,6 +1849,24 @@ app.post("/api/projects/:id/qa-report", async (req: Request, res: Response) => {
     res.json({ status: "PROCESSED" }); // Instantly return report parsed confirmation
 
     if (!passed) {
+      // Submit a bug report to GitHub when QA Runner reports a failure
+      try {
+        const issueTitle = `[QA Runner Bug] Test Suite Failure for Project: ${run.project.name}`;
+        const issueBody = `The Valkyrie QA Runner has detected a test suite failure.\n\n### Reported Errors\n${errors.map((e: string) => `- ${e}`).join("\n")}\n\n### Execution Logs\n\`\`\`\n${logs.join("\n")}\n\`\`\``;
+        
+        const issueResult = await createGithubIssue(projectId, issueTitle, issueBody);
+        if (issueResult.success && issueResult.issueNumber) {
+          updatedLogs.push({
+            timestamp: new Date().toLocaleTimeString(),
+            agent: "QA Engineer (Runner)",
+            message: `Created GitHub Bug Issue #${issueResult.issueNumber}`,
+            type: "info"
+          });
+        }
+      } catch (err: any) {
+        console.error("[ValkyrieQA] Failed to submit bug issue to GitHub:", err.message);
+      }
+
       // Launch Developer Agent fix cycle
       updatedLogs.push({
         timestamp: new Date().toLocaleTimeString(),
@@ -1934,6 +2044,126 @@ async function getGitHubAppToken(installationId: string): Promise<string> {
     console.error("[GitHubApp] Token generation error:", err.message);
   }
   return process.env.GITHUB_TOKEN || "";
+}
+
+// GitHub Issue management helpers
+async function createGithubIssue(projectId: string, title: string, body: string): Promise<{ success: boolean, issueNumber?: number, message: string }> {
+  try {
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project || !project.vcsRepoUrl) {
+      return { success: false, message: "Project or GitHub repository URL missing." };
+    }
+
+    let token = process.env.GITHUB_TOKEN || "";
+    try {
+      if (project.vcsAuthType === "github_app" && project.githubInstallationId) {
+        token = await getGitHubAppToken(project.githubInstallationId);
+      }
+    } catch (e: any) {
+      console.error("[GitHubApp] Failed to load project auth preferences:", e.message);
+    }
+
+    if (!token) {
+      return { success: false, message: "GitHub token missing." };
+    }
+
+    // Extract owner and repo from vcsRepoUrl (e.g., https://github.com/owner/repo or owner/repo)
+    let repoPath = project.vcsRepoUrl.replace("https://github.com/", "").replace(/\.git$/, "");
+    
+    const response = await fetch(`https://api.github.com/repos/${repoPath}/issues`, {
+      method: "POST",
+      headers: {
+        "Accept": "application/vnd.github+json",
+        "Authorization": `Bearer ${token}`,
+        "X-GitHub-Api-Version": "2022-11-28"
+      },
+      body: JSON.stringify({
+        title,
+        body
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return { success: false, message: `GitHub API returned ${response.status}: ${errText}` };
+    }
+
+    const data = await response.json() as any;
+    return {
+      success: true,
+      issueNumber: data.number,
+      message: `Created issue #${data.number} on GitHub`
+    };
+  } catch (err: any) {
+    return { success: false, message: `Failed to create GitHub issue: ${err.message}` };
+  }
+}
+
+async function updateGithubIssue(
+  projectId: string,
+  issueNumber: number,
+  comment: string,
+  state?: "open" | "closed"
+): Promise<{ success: boolean, message: string }> {
+  try {
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project || !project.vcsRepoUrl) {
+      return { success: false, message: "Project or repository URL missing." };
+    }
+
+    let token = process.env.GITHUB_TOKEN || "";
+    try {
+      if (project.vcsAuthType === "github_app" && project.githubInstallationId) {
+        token = await getGitHubAppToken(project.githubInstallationId);
+      }
+    } catch (e: any) {
+      console.error("[GitHubApp] Failed to load project auth preferences:", e.message);
+    }
+
+    if (!token) {
+      return { success: false, message: "GitHub token missing." };
+    }
+
+    let repoPath = project.vcsRepoUrl.replace("https://github.com/", "").replace(/\.git$/, "");
+
+    // 1. Add comment to issue
+    const commentResponse = await fetch(`https://api.github.com/repos/${repoPath}/issues/${issueNumber}/comments`, {
+      method: "POST",
+      headers: {
+        "Accept": "application/vnd.github+json",
+        "Authorization": `Bearer ${token}`,
+        "X-GitHub-Api-Version": "2022-11-28"
+      },
+      body: JSON.stringify({ body: comment })
+    });
+
+    if (!commentResponse.ok) {
+      const errText = await commentResponse.text();
+      console.error("[GitHub Issue Comment Error]:", errText);
+    }
+
+    // 2. Update issue state if provided
+    if (state) {
+      const stateResponse = await fetch(`https://api.github.com/repos/${repoPath}/issues/${issueNumber}`, {
+        method: "PATCH",
+        headers: {
+          "Accept": "application/vnd.github+json",
+          "Authorization": `Bearer ${token}`,
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        body: JSON.stringify({ state })
+      });
+
+      if (!stateResponse.ok) {
+        const errText = await stateResponse.text();
+        console.error("[GitHub Issue Patch Error]:", errText);
+      }
+    }
+
+    return { success: true, message: `Updated issue #${issueNumber}` };
+  } catch (err: any) {
+    return { success: false, message: `Failed to update GitHub issue: ${err.message}` };
+  }
 }
 
 // Git Init, Commit & Remote GitHub push executor

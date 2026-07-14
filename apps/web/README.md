@@ -14,12 +14,13 @@ This is the Next.js frontend application for Valkyrie. It provides developer int
 ### 🚀 Swarm Run Telemetry (`/project/[id]/run`)
 * **Milestone Monitor**: Shows live progress indicators for agent steps:
   `System -> PM -> Architect -> Data Architect -> UI/UX -> Developer -> Security Architect -> Tech Writer -> QA`
-* **Console Terminal**: Streams Server-Sent Event (SSE) agent print statements.
+* **Console Terminal**: Streams Server-Sent Event (SSE) agent print statements and automatically autoscrolls to the bottom when new telemetry messages arrive.
 * **Action Header**: Restart swarm jobs, cancel running jobs, and toggle caching variables.
-* **Token Costs Tracker**: Renders real-time Gemini token metrics and cost estimations.
+* **Token Costs Tracker**: Renders real-time LLM token metrics and cost estimations dynamically calculated based on the selected provider.
 
 ### 🔒 Administration Panel (`/admin`)
 * Restricted to Admin users.
+* **Swarm AI Configurations Form**: Selects the system-wide AI provider (Google, Anthropic, OpenAI, Ollama) and model, saves API keys (masked with password inputs), or configures custom connection endpoints (such as Ollama's local IP address).
 * **Company Profiles Builder**: Provisions tenant organizations (Company ID slug parameter).
 * **Users Creator**: Configures users, company bindings, and RBAC roles.
 * **Telemetry Explorer**: Inspects projects associated with selected companies and calculates total LLM usage statistics.
