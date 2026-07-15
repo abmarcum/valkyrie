@@ -36,7 +36,7 @@ function loadEnv() {
 loadEnv();
 
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = Number(process.env.PORT) || 4000;
 
 app.use(cors());
 app.use(express.json());
@@ -957,7 +957,7 @@ async function runAgentPipeline(
         );
 
         // Scaffolding database files
-        writeProjectFiles(projectId, language, dataText || "-- Generated database schema");
+        writeProjectFiles(projectId, language, dataText || "-- Generated database schema", false);
         await addLog("Data Architect", `Database schemas generated successfully:\n${dataText.substring(0, 150)}...`, "success");
         writeDataFile(projectId, "database.md", dataText);
         completedStatuses.add("DATA_DB");
@@ -1013,7 +1013,7 @@ async function runAgentPipeline(
         );
 
         // Scaffolding UI files
-        writeProjectFiles(projectId, language, uiText || "/* Generated UI/UX styles */");
+        writeProjectFiles(projectId, language, uiText || "/* Generated UI/UX styles */", false);
         await addLog("UI/UX Designer", `UI/UX spec generated successfully:\n${uiText.substring(0, 150)}...`, "success");
         writeDocFile(projectId, "ui_ux.md", uiText);
         completedStatuses.add("UI_DESIGN");
@@ -1175,7 +1175,7 @@ Structure each document with path headers (e.g. ## README.md or ## docs/api.md) 
         );
 
         // Write documentation files into generated folder
-        writeProjectFiles(projectId, language, docText || "# Documentation");
+        writeProjectFiles(projectId, language, docText || "# Documentation", false);
         await addLog("Tech Writer", "Documentation generated successfully. README and API files saved to disk.", "success");
 
         // Git Commit & GitHub push integration
@@ -1418,7 +1418,7 @@ function isValidFilePath(filePath: string): boolean {
 }
 
 // Write generated files to storage
-function writeProjectFiles(projectId: string, language: string, content: string) {
+function writeProjectFiles(projectId: string, language: string, content: string, allowFallback = true) {
   const dirPath = path.join(__dirname, `../../../generated/${projectId}`);
   fs.mkdirSync(dirPath, { recursive: true });
 
@@ -1478,7 +1478,7 @@ function writeProjectFiles(projectId: string, language: string, content: string)
   }
 
   // If no files were successfully parsed, write the whole chunk to the default file
-  if (!parsedAny) {
+  if (!parsedAny && allowFallback) {
     const filesMap: Record<string, string> = {
       typescript: "index.ts",
       python: "main.py",
@@ -1490,7 +1490,7 @@ function writeProjectFiles(projectId: string, language: string, content: string)
   }
 
   // Write a basic dummy test suite if no specific test file was generated
-  if (!hasTestFile) {
+  if (!hasTestFile && allowFallback) {
     const testMap: Record<string, string> = {
       typescript: "test.js",
       python: "test.py",
@@ -1783,16 +1783,26 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
       const pushResult = await pushToGithub(projectId, run.project.vcsRepoUrl);
       await addFixLog("Developer Agent", `Fixes pushed to GitHub: ${pushResult.message}`, pushResult.success ? "success" : "error");
 
-      // Scan logs to see if we have a GitHub issue number to update
+      // Scan logs to see if we have any GitHub issue numbers to update
       try {
         const logsArr = JSON.parse(run.logs as string);
-        const issueLog = logsArr.find((l: any) => l.message && l.message.startsWith("Created GitHub Bug Issue #"));
-        if (issueLog) {
-          const match = issueLog.message.match(/#(\d+)/);
+        const issueLogs = logsArr.filter((l: any) => l.message && l.message.includes("GitHub Bug Issue #"));
+        
+        const closedIssueNumbers = new Set<number>();
+        for (const log of issueLogs) {
+          const match = log.message.match(/#(\d+)/);
           if (match && match[1]) {
             const issueNumber = parseInt(match[1], 10);
+            if (closedIssueNumbers.has(issueNumber)) {
+              continue;
+            }
+            closedIssueNumbers.add(issueNumber);
+            
             await addFixLog("Developer Agent", `Updating GitHub Bug Issue #${issueNumber}...`, "info");
-            const commentBody = `The Developer Agent has successfully resolved the reported test suite failures and committed the fix in project run ${projectId}.\n\n### Commit Result\n${pushResult.message}`;
+            let commentBody = `The Developer Agent has successfully resolved the reported test suite failures and committed the fix in project run ${projectId}.\n\n### Commit Result\n${pushResult.message}`;
+            if ((pushResult as any).commitLink) {
+              commentBody += `\n\n### Committed Code Link\n${(pushResult as any).commitLink}`;
+            }
             const updateResult = await updateGithubIssue(projectId, issueNumber, commentBody, "closed");
             if (updateResult.success) {
               await addFixLog("Developer Agent", `GitHub Bug Issue #${issueNumber} updated and closed.`, "success");
@@ -1851,15 +1861,34 @@ app.post("/api/projects/:id/qa-report", async (req: Request, res: Response) => {
     if (!passed) {
       // Submit a bug report to GitHub when QA Runner reports a failure
       try {
-        const issueTitle = `[QA Runner Bug] Test Suite Failure for Project: ${run.project.name}`;
-        const issueBody = `The Valkyrie QA Runner has detected a test suite failure.\n\n### Reported Errors\n${errors.map((e: string) => `- ${e}`).join("\n")}\n\n### Execution Logs\n\`\`\`\n${logs.join("\n")}\n\`\`\``;
+        let cleanError = "Unknown Error";
+        if (errors && errors.length > 0) {
+          const firstLine = errors[0].split("\n")[0].trim();
+          cleanError = firstLine.length > 80 ? firstLine.substring(0, 80) + "..." : firstLine;
+        }
+        const issueTitle = `[QA Runner Bug] ${cleanError} (Project: ${run.project.name})`;
+        
+        const issueBody = `The Valkyrie QA Runner has detected a test suite failure.
+
+### Error Details (stderr / execution failure)
+\`\`\`
+${errors && errors.length > 0 ? errors.join("\n") : "(No errors reported)"}
+\`\`\`
+
+### Execution Logs (stdout)
+\`\`\`
+${logs && logs.length > 0 ? logs.join("\n") : "(No stdout output)"}
+\`\`\``;
         
         const issueResult = await createGithubIssue(projectId, issueTitle, issueBody);
         if (issueResult.success && issueResult.issueNumber) {
+          const isDuplicate = issueResult.message.includes("Duplicate");
           updatedLogs.push({
             timestamp: new Date().toLocaleTimeString(),
             agent: "QA Engineer (Runner)",
-            message: `Created GitHub Bug Issue #${issueResult.issueNumber}`,
+            message: isDuplicate 
+              ? `Referenced existing open GitHub Bug Issue #${issueResult.issueNumber}` 
+              : `Created GitHub Bug Issue #${issueResult.issueNumber}`,
             type: "info"
           });
         }
@@ -2070,6 +2099,32 @@ async function createGithubIssue(projectId: string, title: string, body: string)
     // Extract owner and repo from vcsRepoUrl (e.g., https://github.com/owner/repo or owner/repo)
     let repoPath = project.vcsRepoUrl.replace("https://github.com/", "").replace(/\.git$/, "");
     
+    // Check if duplicate issue exists
+    try {
+      const listResponse = await fetch(`https://api.github.com/repos/${repoPath}/issues?state=open`, {
+        method: "GET",
+        headers: {
+          "Accept": "application/vnd.github+json",
+          "Authorization": `Bearer ${token}`,
+          "X-GitHub-Api-Version": "2022-11-28"
+        }
+      });
+      if (listResponse.ok) {
+        const openIssues = await listResponse.json() as any[];
+        const duplicate = openIssues.find(iss => iss.title === title);
+        if (duplicate) {
+          console.log(`[GitHubIssue] Matching duplicate open issue found: #${duplicate.number}`);
+          return {
+            success: true,
+            issueNumber: duplicate.number,
+            message: `Duplicate open issue #${duplicate.number} already exists on GitHub.`
+          };
+        }
+      }
+    } catch (e: any) {
+      console.error("[GitHubIssue] Failed to fetch open issues for duplication check:", e.message);
+    }
+
     const response = await fetch(`https://api.github.com/repos/${repoPath}/issues`, {
       method: "POST",
       headers: {
@@ -2212,7 +2267,22 @@ async function pushToGithub(projectId: string, repoUrl: string) {
       await execAsync(`git remote add origin ${remoteUrl}`, { cwd: dirPath });
       await execAsync("git branch -M main", { cwd: dirPath });
       await execAsync("git push -u origin main --force", { cwd: dirPath });
-      return { success: true, message: `Successfully pushed repository to: ${repoUrl}` };
+      
+      let commitHash = "";
+      try {
+        const hashRes = await execAsync("git rev-parse HEAD", { cwd: dirPath });
+        commitHash = hashRes.stdout.trim();
+      } catch (e) {}
+
+      const cleanRepoUrl = repoUrl.endsWith(".git") ? repoUrl.slice(0, -4) : repoUrl;
+      const commitLink = commitHash ? `${cleanRepoUrl}/commit/${commitHash}` : "";
+
+      return { 
+        success: true, 
+        message: `Successfully pushed repository to: ${repoUrl}`,
+        commitHash,
+        commitLink
+      };
     }
     return { success: true, message: "Locally initialized git repository and committed code successfully." };
   } catch (err: any) {
@@ -2277,6 +2347,6 @@ app.get("/api/admin/stats", authMiddleware, requireRole(["admin"]), async (req: 
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Valkyrie Orchestrator running on http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Valkyrie Orchestrator running on http://0.0.0.0:${PORT}`);
 });

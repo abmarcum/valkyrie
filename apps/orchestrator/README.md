@@ -11,7 +11,7 @@ The Orchestrator manages the execution flow of the AI swarm. It parses developer
    * The **Software Architect** validates developer files against the architectural design (capped at a maximum of 3 validation iterations).
    * The **Security Architect** audits the developer code for injection vectors, secret leaks, and OWASP Top 10 vulnerabilities.
 3. **Immediate Remote pushes**: Codebase changes are committed and pushed to the project's GitHub repository immediately after the Security Architect finishes auditing the code, before technical manuals are built.
-4. **Self-Healing Loop & Issue Tracker**: Receives test reports from the QA Runner. If tests fail, the orchestrator triggers the Developer Agent to analyze the bugs, automatically **submits a GitHub bug issue**, applies fixes, commits/pushes the fix to GitHub, and comments on/closes the issue.
+4. **Self-Healing Loop & Issue Tracker**: Receives test reports from the QA Runner. If tests fail, the orchestrator automatically **submits a descriptive GitHub bug issue** containing full stdout/stderr system log segments, triggers the Developer Agent to analyze the bugs and apply fixes, commits and pushes the fixes to GitHub, and **comments on the issue with a direct link to the new commit** before closing it.
 5. **Multi-API Provider Engine**: Supports Google (Gemini), Anthropic (Claude), OpenAI (GPT), and Ollama (local server). System settings default to local Ollama inference running model `qwen3-coder:latest` on port `11434`.
 6. **LLM Proxying Service**: Decouples sandboxed runners from API key variables by hosting a centralized completion proxy.
 7. **Caching Engine**: Built-in in-memory KV prompt response caching. Can be toggled on/off in project telemetry headers.

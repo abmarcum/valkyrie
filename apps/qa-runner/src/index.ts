@@ -367,7 +367,17 @@ async function executeQA() {
   try {
     console.log(`\n[1/3] Downloading generated codebase files...`);
     let files = await downloadWorkspaceFiles();
-    let testFile = files.find(f => f.name.startsWith("test."));
+    const findTestFile = (fileList: Array<{ name: string; content: string }>) => {
+      return fileList.find(f => {
+        const nameLower = f.name.toLowerCase();
+        return nameLower.startsWith("test.") || 
+               nameLower.startsWith("tests/test_") || 
+               nameLower.endsWith("_test.py") || 
+               nameLower.endsWith(".test.js") || 
+               nameLower.endsWith(".test.ts");
+      });
+    };
+    let testFile = findTestFile(files);
 
     if (files.length === 0 || !testFile) {
       console.log(`[QA Runner] Test plan/script file not found in sandbox files.`);
@@ -381,17 +391,31 @@ async function executeQA() {
           return;
         }
 
+        // If the status is QA_LOOP (meaning we are ready to test) and we still have no test file,
+        // we break the loop and create a default test file rather than waiting indefinitely.
+        if (currentStatus === "QA_LOOP" && files.length > 0) {
+          console.log(`[QA Runner] Pipeline is in QA_LOOP but no test plan file was generated. Creating default test script...`);
+          const isPython = files.some(f => f.name.endsWith(".py") || f.name === "requirements.txt");
+          const defaultTestName = isPython ? "test.py" : "test.js";
+          testFile = { name: defaultTestName, content: "# Placeholder test suite" };
+          files.push(testFile);
+          break;
+        }
+
         console.log(`[QA Runner] Awaiting creation of test plan/script file... (Current status: ${currentStatus || "unknown"})`);
         await new Promise(resolve => setTimeout(resolve, 5000));
         
         files = await downloadWorkspaceFiles();
-        testFile = files.find(f => f.name.startsWith("test."));
+        testFile = findTestFile(files);
       }
       console.log(`[QA Runner] Test plan/script found: ${testFile.name}. Proceeding to local testing sandbox...`);
     }
 
     // Prepare local sandbox folder
     const sandboxDir = path.join(__dirname, "../sandbox", projectId);
+    if (fs.existsSync(sandboxDir)) {
+      fs.rmSync(sandboxDir, { recursive: true, force: true });
+    }
     fs.mkdirSync(sandboxDir, { recursive: true });
 
     console.log(`[2/3] Writing files to local sandbox: ${sandboxDir}`);

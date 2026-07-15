@@ -50,3 +50,10 @@ Run the server independently:
 npm run dev
 ```
 By default, the server boots on port `3000`.
+
+---
+
+## 🚀 Vercel Production Deployment
+
+To host this Next.js app on Vercel and connect it to a cloud hosted Postgres database and orchestrator server, see the **[Valkyrie Production Deployment Guide](../../docs/vercel_deployment.md)**.
+

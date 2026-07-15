@@ -62,9 +62,9 @@ When a project run is initiated, the orchestrator triggers the agent pipeline se
    │
    └────────────[If tests fail (Self-Healing Loop, Max 8 attempts)]
                  │
-                 ├──► [Creates GitHub Bug Issue detailing execution failures]
+                 ├──► [Creates GitHub Bug Issue with descriptive error title and full stdout/stderr logs]
                  │
-                 ├──► [Developer Agent updates, pushes fix, and closes issue]
+                 ├──► [Developer Agent updates, pushes fix, comments with commit links, and closes issue]
                  │
                  ▼
             [Re-develop]
@@ -148,3 +148,10 @@ docker run -e GEMINI_API_KEY=$GEMINI_API_KEY \
            -e ORCHESTRATOR_URL=http://host.docker.internal:4000 \
            valkyrie-qa-runner --project <project-id>
 ```
+
+---
+
+## 🚀 Production Deployment (Vercel & Cloud)
+
+For production deployment configuration, database migration guides (SQLite to cloud PostgreSQL), monorepo Next.js setup on Vercel, and persistent backend configuration settings on Render or Railway, see the detailed **[Production Deployment Guide](file:///Users/andrew/ai-workspace/code/valkyrie/docs/vercel_deployment.md)**.
+

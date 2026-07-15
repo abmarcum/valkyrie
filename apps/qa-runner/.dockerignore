@@ -1,0 +1,5 @@
+sandbox/
+dist/
+node_modules/
+.turbo/
+*.log
