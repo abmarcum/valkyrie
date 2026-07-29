@@ -199,14 +199,14 @@ export default function RunPipeline() {
       {/* Header */}
       <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50 py-3 sm:py-0 min-h-16 flex items-center">
         <div className="max-w-7xl w-full mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center space-x-3 self-start sm:self-center">
+          <a href="/" className="flex items-center space-x-3 self-start sm:self-center hover:opacity-90 transition-opacity">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-violet-600 to-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/20">
               V
             </div>
             <span className="font-extrabold text-xl tracking-tight bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent">
               VALKYRIE
             </span>
-          </div>
+          </a>
           <nav className="flex flex-wrap items-center justify-start sm:justify-end gap-3 sm:gap-6 text-sm font-medium text-slate-400 w-full sm:w-auto">
             <a href="/dashboard" className="hover:text-slate-200 transition-colors">Dashboard</a>
             {user?.role === "admin" && (

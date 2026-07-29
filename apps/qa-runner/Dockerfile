@@ -1,5 +1,5 @@
-# Use Node.js 20 base image
-FROM node:20-bookworm-slim
+# Use Node.js 24 base image
+FROM node:24-bookworm-slim
 
 # Copy uv binary from the official uv image
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
