@@ -34,16 +34,9 @@ loadDotenv(path.join(__dirname, "../../../.env"));
 const args = process.argv.slice(2);
 const isMcp = args.includes("--mcp");
 export const projectIdIndex = args.indexOf("--project");
-export const projectId = projectIdIndex !== -1 ? args[projectIdIndex + 1] : "proj-1";
+export const explicitProjectId = projectIdIndex !== -1 ? args[projectIdIndex + 1] : undefined;
+export const projectId = explicitProjectId || "global-daemon";
 export const orchestratorUrl = process.env.ORCHESTRATOR_URL || "http://localhost:4000";
-
-if (!isMcp) {
-  console.log(`===============================================`);
-  console.log(` Valkyrie Local QA Runner CLI & AI QA Agent v1.0.0`);
-  console.log(` Target Project: ${projectId}`);
-  console.log(` Central Orchestrator: ${orchestratorUrl}`);
-  console.log(`===============================================`);
-}
 
 // Helper to post JSON report
 export function sendReport(projId: string, passed: boolean, logs: string[], errors: string[]) {
@@ -363,10 +356,11 @@ export function pollForStatus(expectedStatus: string, projId: string = projectId
 }
 
 // Run the QA verification process
-async function executeQA() {
+async function executeQA(targetProjectId?: string) {
+  const currentProjId = targetProjectId || explicitProjectId || "proj-1";
   try {
-    console.log(`\n[1/3] Downloading generated codebase files...`);
-    let files = await downloadWorkspaceFiles();
+    console.log(`\n[1/3] Downloading generated codebase files for project '${currentProjId}'...`);
+    let files = await downloadWorkspaceFiles(currentProjId);
     const findTestFile = (fileList: Array<{ name: string; content: string }>) => {
       return fileList.find(f => {
         const nameLower = f.name.toLowerCase();
@@ -382,12 +376,12 @@ async function executeQA() {
     if (files.length === 0 || !testFile) {
       console.log(`[QA Runner] Test plan/script file not found in sandbox files.`);
       while (files.length === 0 || !testFile) {
-        const currentStatus = await fetchProjectStatus(projectId);
+        const currentStatus = await fetchProjectStatus(currentProjId);
         
         // If the execution has finished or was cancelled, we stop waiting
         if (currentStatus === "SUCCESS" || currentStatus === "FAILED" || currentStatus === "CANCELLED") {
           console.log(`[QA Runner] Pipeline execution ended with status: ${currentStatus} without generating a test plan.`);
-          sendReport(projectId, true, ["No test scripts found. Pipeline ended."], []);
+          sendReport(currentProjId, true, ["No test scripts found. Pipeline ended."], []);
           return;
         }
 
@@ -402,17 +396,17 @@ async function executeQA() {
           break;
         }
 
-        console.log(`[QA Runner] Awaiting creation of test plan/script file... (Current status: ${currentStatus || "unknown"})`);
+        console.log(`[QA Runner] Awaiting creation of test plan/script file for ${currentProjId}... (Current status: ${currentStatus || "unknown"})`);
         await new Promise(resolve => setTimeout(resolve, 5000));
         
-        files = await downloadWorkspaceFiles();
+        files = await downloadWorkspaceFiles(currentProjId);
         testFile = findTestFile(files);
       }
       console.log(`[QA Runner] Test plan/script found: ${testFile.name}. Proceeding to local testing sandbox...`);
     }
 
     // Prepare local sandbox folder
-    const sandboxDir = path.join(__dirname, "../sandbox", projectId);
+    const sandboxDir = path.join(__dirname, "../sandbox", currentProjId);
     if (fs.existsSync(sandboxDir)) {
       fs.rmSync(sandboxDir, { recursive: true, force: true });
     }
@@ -437,7 +431,7 @@ async function executeQA() {
         console.error(`\n❌ QA Runner: Application failed to start!`);
         console.error(startupResult.errorMsg);
         
-        sendReport(projectId, false, startupResult.logs, [startupResult.errorMsg]);
+        sendReport(currentProjId, false, startupResult.logs, [startupResult.errorMsg]);
         
         if (fixAttempts >= MAX_FIX_ATTEMPTS) {
           console.error(`\n❌ QA Runner: Exceeded maximum fix attempts (${MAX_FIX_ATTEMPTS}). Halting self-healing loop.`);
@@ -446,9 +440,9 @@ async function executeQA() {
 
         fixAttempts++;
         console.log(`[QA Runner] (Attempt ${fixAttempts}/${MAX_FIX_ATTEMPTS}) Waiting for Developer Agent to analyze logs and apply fixes...`);
-        await pollForStatus("QA_LOOP");
+        await pollForStatus("QA_LOOP", currentProjId);
         console.log(`[QA Runner] Developer Agent has applied fixes! Re-triggering QA test suite run...`);
-        executeQA();
+        executeQA(currentProjId);
         return;
       }
       console.log(`\n[QA Runner] Application startup verified successfully. Proceeding to AI QA Agent assertions testing...\n`);
@@ -457,7 +451,7 @@ async function executeQA() {
     console.log(`[3/3] Locating and executing test script assertions...`);
 
     const ext = testFile.name.endsWith(".js") ? "js" : "py";
-    const aiTestContent = await generateAIAssertions(files, testFile.name, ext);
+    const aiTestContent = await generateAIAssertions(files, testFile.name, ext, currentProjId);
     if (aiTestContent) {
       const testFilePath = path.join(sandboxDir, testFile.name);
       fs.writeFileSync(testFilePath, aiTestContent);
@@ -504,7 +498,7 @@ async function executeQA() {
         }
         fileWatcher.close();
         setTimeout(() => {
-          executeQA();
+          executeQA(currentProjId);
         }, 1000);
       }
     });
@@ -526,11 +520,11 @@ async function executeQA() {
 
       // Save stdout/stderr logs locally to the generated project directory for review and commit
       try {
-        const genLogDir = path.join(__dirname, "../../../generated", projectId);
+        const genLogDir = path.join(__dirname, "../../../generated", currentProjId);
         if (fs.existsSync(genLogDir)) {
-          const logContent = `========================================\n Valkyrie QA Runner Execution Log\n Project: ${projectId}\n Timestamp: ${new Date().toISOString()}\n Attempt: ${fixAttempts}\n Command: ${command}\n Status: ${error ? "FAILED" : "PASSED"}\n========================================\n\n[STDOUT]\n${stdout}\n\n[STDERR]\n${stderr || (error ? error.message : "")}\n`;
+          const logContent = `========================================\n Valkyrie QA Runner Execution Log\n Project: ${currentProjId}\n Timestamp: ${new Date().toISOString()}\n Attempt: ${fixAttempts}\n Command: ${command}\n Status: ${error ? "FAILED" : "PASSED"}\n========================================\n\n[STDOUT]\n${stdout}\n\n[STDERR]\n${stderr || (error ? error.message : "")}\n`;
           fs.writeFileSync(path.join(genLogDir, "qa_runner.log"), logContent, "utf-8");
-          console.log(`[QA Agent] QA Execution logs successfully saved to: generated/${projectId}/qa_runner.log`);
+          console.log(`[QA Agent] QA Execution logs successfully saved to: generated/${currentProjId}/qa_runner.log`);
         }
       } catch (logErr: any) {
         console.error("[QA Agent] Failed to write local log file:", logErr.message);
@@ -540,7 +534,7 @@ async function executeQA() {
         console.error(`\n❌ QA Suite Failure reported!`);
         console.error(stderr || error.message);
         errors.push(error.message);
-        sendReport(projectId, false, logs, errors);
+        sendReport(currentProjId, false, logs, errors);
 
         if (fixAttempts >= MAX_FIX_ATTEMPTS) {
           console.error(`\n❌ QA Runner: Exceeded maximum fix attempts (${MAX_FIX_ATTEMPTS}). Halting self-healing loop.`);
@@ -549,14 +543,14 @@ async function executeQA() {
 
         fixAttempts++;
         console.log(`[QA Runner] (Attempt ${fixAttempts}/${MAX_FIX_ATTEMPTS}) Waiting for Developer Agent to analyze logs and apply fixes...`);
-        await pollForStatus("QA_LOOP");
+        await pollForStatus("QA_LOOP", currentProjId);
         console.log(`[QA Runner] Developer Agent has applied fixes! Re-triggering QA test suite run...`);
         // Recurse to run the updated codebase
-        executeQA();
+        executeQA(currentProjId);
       } else {
-        console.log(`\n✅ QA Suite Success! All assertions verified.`);
+        console.log(`\n✅ QA Suite Success! All assertions verified for project ${currentProjId}.`);
         console.log(stdout);
-        sendReport(projectId, true, logs, errors);
+        sendReport(currentProjId, true, logs, errors);
       }
     });
 
@@ -565,8 +559,54 @@ async function executeQA() {
   }
 }
 
+async function startGlobalQaDaemon() {
+  console.log(`===============================================`);
+  console.log(` Valkyrie Dynamic QA Daemon v1.0.0`);
+  console.log(` Mode: Global Multi-Project Listener`);
+  console.log(` Central Orchestrator: ${orchestratorUrl}`);
+  console.log(`===============================================`);
+  console.log(`[QA Daemon] Monitoring orchestrator for active projects in QA_LOOP...`);
+
+  const activeProcessing = new Set<string>();
+
+  while (true) {
+    try {
+      const url = `${orchestratorUrl}/api/projects`;
+      const response = await fetch(url);
+      if (response.ok) {
+        const projects = await response.json() as any[];
+        const pendingProjects = projects.filter(p => p.status === "QA_LOOP" && !activeProcessing.has(p.id));
+
+        for (const proj of pendingProjects) {
+          console.log(`\n[QA Daemon] 🎯 Picked up project '${proj.name}' (${proj.id}) in QA_LOOP! Executing test suite...`);
+          activeProcessing.add(proj.id);
+          try {
+            await executeQA(proj.id);
+          } catch (e: any) {
+            console.error(`[QA Daemon] Error processing ${proj.id}:`, e.message);
+          } finally {
+            activeProcessing.delete(proj.id);
+          }
+        }
+      }
+    } catch (err: any) {
+      // Quiet retry when orchestrator is starting up
+    }
+    await new Promise(resolve => setTimeout(resolve, 4000));
+  }
+}
+
 if (!isMcp) {
-  executeQA();
+  if (explicitProjectId) {
+    console.log(`===============================================`);
+    console.log(` Valkyrie Local QA Runner CLI v1.0.0`);
+    console.log(` Target Project: ${explicitProjectId}`);
+    console.log(` Central Orchestrator: ${orchestratorUrl}`);
+    console.log(`===============================================`);
+    executeQA(explicitProjectId);
+  } else {
+    startGlobalQaDaemon();
+  }
 } else {
   // Start the lightweight MCP server inside the QA Runner package
   import("./mcp").then((mcp) => {

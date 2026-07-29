@@ -43,14 +43,18 @@ npm run start -w @valkyrie/qa-runner -- --mcp
 
 ## 🐳 Containerized Execution (Docker)
 
-To run the QA runner inside a container containing Node, Python, and `uv`:
+To run the QA runner as a continuous background daemon that listens for and tests **any project**:
 
 ```bash
 # 1. Build the container
 docker build -f apps/qa-runner/Dockerfile -t valkyrie-qa-runner .
 
-# 2. Execute tests containerized
-docker run -e GEMINI_API_KEY=$GEMINI_API_KEY \
-           -e ORCHESTRATOR_URL=http://host.docker.internal:4000 \
-           valkyrie-qa-runner --project <project-id>
+# 2. Run as Global Multi-Project Daemon (No project ID required!)
+docker run -d \
+       --name valkyrie-qa-runner \
+       --restart unless-stopped \
+       -e ORCHESTRATOR_URL=https://valkyrie-api.fooguru.org \
+       valkyrie-qa-runner
 ```
+
+*Note: If you wish to target a specific single project, pass `--project <project-id>` at the end of `docker run`.*
