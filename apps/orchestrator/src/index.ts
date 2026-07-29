@@ -743,11 +743,31 @@ async function callGeminiWithRetry(
       attempt++;
       const errorMessage = err.message || JSON.stringify(err);
 
-      // Self-healing fallback only applicable for Google Gemini model names
-      if (provider === "google" && errorMessage.includes("404") && activeModel !== "gemini-1.5-flash") {
+      // Self-healing fallback for invalid or unrecognized model names across all providers
+      if (provider === "anthropic" && (errorMessage.includes("400") || errorMessage.includes("not_found")) && activeModel !== "claude-3-5-sonnet-20241022") {
         await addLog(
           agentName,
-          `Model ${activeModel} not found (404). Reverting to verified Gemini stable (gemini-1.5-flash)...`,
+          `Model '${activeModel}' is invalid or unrecognized by Anthropic. Reverting to verified stable model (claude-3-5-sonnet-20241022)...`,
+          "warning"
+        );
+        activeModel = "claude-3-5-sonnet-20241022";
+        continue;
+      }
+
+      if (provider === "openai" && (errorMessage.includes("404") || errorMessage.includes("400")) && activeModel !== "gpt-4o-mini") {
+        await addLog(
+          agentName,
+          `Model '${activeModel}' is invalid or unrecognized by OpenAI. Reverting to verified stable model (gpt-4o-mini)...`,
+          "warning"
+        );
+        activeModel = "gpt-4o-mini";
+        continue;
+      }
+
+      if (provider === "google" && (errorMessage.includes("404") || errorMessage.includes("400")) && activeModel !== "gemini-1.5-flash") {
+        await addLog(
+          agentName,
+          `Model '${activeModel}' is invalid or unrecognized by Google. Reverting to verified stable model (gemini-1.5-flash)...`,
           "warning"
         );
         activeModel = "gemini-1.5-flash";
