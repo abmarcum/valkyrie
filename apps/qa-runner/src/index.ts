@@ -571,13 +571,14 @@ async function startGlobalQaDaemon() {
 
   while (true) {
     try {
-      const url = `${orchestratorUrl}/api/projects`;
+      const url = `${orchestratorUrl}/api/projects/pending-qa`;
       const response = await fetch(url);
       if (response.ok) {
-        const projects = await response.json() as any[];
-        const pendingProjects = projects.filter(p => p.status === "QA_LOOP" && !activeProcessing.has(p.id));
+        const pendingProjects = await response.json() as any[];
 
         for (const proj of pendingProjects) {
+          if (activeProcessing.has(proj.id)) continue;
+
           console.log(`\n[QA Daemon] 🎯 Picked up project '${proj.name}' (${proj.id}) in QA_LOOP! Executing test suite...`);
           activeProcessing.add(proj.id);
           try {

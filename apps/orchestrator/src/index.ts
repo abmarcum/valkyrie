@@ -1727,6 +1727,30 @@ app.get("/api/projects", { preHandler: [authMiddleware] }, async (req: FastifyRe
   }
 });
 
+// REST: Query pending projects in QA_LOOP for QA Runner daemon
+app.get("/api/projects/pending-qa", async (req: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const runs = await prisma.agentRun.findMany({
+      where: {
+        status: "QA_LOOP"
+      },
+      include: {
+        project: true
+      }
+    });
+
+    const pending = runs.map(r => ({
+      id: r.projectId,
+      name: r.project?.name || r.projectId,
+      status: r.status
+    }));
+
+    return reply.send(pending);
+  } catch (err: any) {
+    return reply.status(500).send({ error: err.message });
+  }
+});
+
 // REST: Delete a project and its workspace
 app.delete("/api/projects/:id", { preHandler: [authMiddleware, requireRole(["admin", "user"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
   const projectId = (req.params as any).id;
@@ -2434,7 +2458,8 @@ async function pushToGithub(projectId: string, repoUrl: string) {
     try {
       await execAsync('git commit -m "Scaffold from Valkyrie multi-agent swarm"', { cwd: dirPath });
     } catch (commitErr: any) {
-      if (!commitErr.message.includes("nothing to commit") && !commitErr.message.includes("working tree clean")) {
+      const fullOutput = `${commitErr.message || ''} ${commitErr.stdout || ''} ${commitErr.stderr || ''}`;
+      if (!fullOutput.includes("nothing to commit") && !fullOutput.includes("working tree clean")) {
         throw commitErr;
       }
     }
