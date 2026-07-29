@@ -444,8 +444,8 @@ export default function AdminDashboard() {
                     const prov = e.target.value;
                     setSelectedProvider(prov);
                     if (prov === "google") setSelectedModel("gemini-3.5-flash");
-                    else if (prov === "anthropic") setSelectedModel("claude-3-5-sonnet-20241022");
-                    else if (prov === "openai") setSelectedModel("gpt-4o-mini");
+                    else if (prov === "anthropic") setSelectedModel("claude-sonnet-5");
+                    else if (prov === "openai") setSelectedModel("gpt-5.6-luna");
                     else if (prov === "ollama") setSelectedModel("qwen3-coder:latest");
                   }}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors"

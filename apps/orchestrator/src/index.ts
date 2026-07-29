@@ -642,8 +642,7 @@ async function callGeminiWithRetry(
             model: activeModel,
             max_tokens: 4096,
             system: systemPrompt,
-            messages: [{ role: "user", content: userPrompt }],
-            temperature: 0.2
+            messages: [{ role: "user", content: userPrompt }]
           })
         });
 
@@ -744,23 +743,23 @@ async function callGeminiWithRetry(
       const errorMessage = err.message || JSON.stringify(err);
 
       // Self-healing fallback for invalid or unrecognized model names across all providers
-      if (provider === "anthropic" && (errorMessage.includes("400") || errorMessage.includes("not_found")) && activeModel !== "claude-3-5-sonnet-20241022") {
+      if (provider === "anthropic" && (errorMessage.includes("not_found") || errorMessage.includes("unknown_model")) && activeModel !== "claude-sonnet-5") {
         await addLog(
           agentName,
-          `Model '${activeModel}' is invalid or unrecognized by Anthropic. Reverting to verified stable model (claude-3-5-sonnet-20241022)...`,
+          `Model '${activeModel}' is invalid or unrecognized by Anthropic. Reverting to verified stable model (claude-sonnet-5)...`,
           "warning"
         );
-        activeModel = "claude-3-5-sonnet-20241022";
+        activeModel = "claude-sonnet-5";
         continue;
       }
 
-      if (provider === "openai" && (errorMessage.includes("404") || errorMessage.includes("400")) && activeModel !== "gpt-4o-mini") {
+      if (provider === "openai" && (errorMessage.includes("404") || errorMessage.includes("400")) && activeModel !== "gpt-5.6-luna") {
         await addLog(
           agentName,
-          `Model '${activeModel}' is invalid or unrecognized by OpenAI. Reverting to verified stable model (gpt-4o-mini)...`,
+          `Model '${activeModel}' is invalid or unrecognized by OpenAI. Reverting to verified stable model (gpt-5.6-luna)...`,
           "warning"
         );
-        activeModel = "gpt-4o-mini";
+        activeModel = "gpt-5.6-luna";
         continue;
       }
 
