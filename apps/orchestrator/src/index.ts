@@ -1515,8 +1515,10 @@ app.get("/api/projects/:id/stream", { preHandler: [authMiddleware] }, async (req
   const projectId = (req.params as any).id;
 
   reply.raw.setHeader("Content-Type", "text/event-stream");
-  reply.raw.setHeader("Cache-Control", "no-cache");
+  reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
   reply.raw.setHeader("Connection", "keep-alive");
+  reply.raw.setHeader("X-Accel-Buffering", "no");
+  reply.raw.setHeader("Access-Control-Allow-Origin", "*");
 
   // Add client connection
   if (!sseClients.has(projectId)) {
@@ -1546,6 +1548,35 @@ app.get("/api/projects/:id/stream", { preHandler: [authMiddleware] }, async (req
     const clients = sseClients.get(projectId) || [];
     sseClients.set(projectId, clients.filter(c => c !== reply.raw));
   });
+});
+
+// REST: Get full agent run details including logs
+app.get("/api/projects/:id/run", { preHandler: [authMiddleware] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  const projectId = (req.params as any).id;
+  try {
+    const run = await prisma.agentRun.findUnique({
+      where: { id: projectId },
+      include: { project: true }
+    });
+    if (!run) {
+      return reply.status(404).send({ error: "Agent run not found." });
+    }
+    let parsedLogs = [];
+    try {
+      parsedLogs = JSON.parse((run.logs as string) || "[]");
+    } catch (e) {}
+
+    return reply.send({
+      projectId,
+      projectName: run.project.name,
+      language: run.project.programmingLanguage,
+      cloud: run.project.deployTarget,
+      status: run.status,
+      logs: parsedLogs
+    });
+  } catch (err: any) {
+    return reply.status(500).send({ error: err.message });
+  }
 });
 
 // REST: Get all projects

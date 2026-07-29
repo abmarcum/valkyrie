@@ -155,6 +155,44 @@ export default function RunPipeline() {
     const token = localStorage.getItem("token");
     if (!token) return;
 
+    // Helper to fetch latest run state via REST
+    const fetchRunState = async () => {
+      try {
+        const res = await fetch(`${ORCHESTRATOR_URL}/api/projects/${id}/run`, {
+          headers: {
+            "Authorization": `Bearer ${token}`
+          }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.logs && Array.isArray(data.logs) && data.logs.length > 0) {
+            setLogs(data.logs);
+          }
+          if (data.status) {
+            // Update milestones based on status
+            const activeRoleMap: Record<string, string> = {
+              "ACTIVE": "Product Manager",
+              "QA_LOOP": "QA Engineer (Runner)",
+              "COMPLETED": "Tech Writer"
+            };
+            const currentRole = activeRoleMap[data.status] || "Product Manager";
+            setMilestones(prev => prev.map(m => {
+              if (m.name === currentRole) return { ...m, status: data.status === "COMPLETED" ? "success" : "running" };
+              return m;
+            }));
+          }
+        }
+      } catch (e) {
+        console.error("Error fetching run state via REST:", e);
+      }
+    };
+
+    // Immediate REST fetch on page load
+    fetchRunState();
+
+    // REST polling interval fallback every 2 seconds
+    const pollInterval = setInterval(fetchRunState, 2000);
+
     // Connect to SSE stream passing OAuth token in query params
     const eventSource = new EventSource(`${ORCHESTRATOR_URL}/api/projects/${id}/stream?token=${token}`);
 
@@ -163,7 +201,6 @@ export default function RunPipeline() {
         const data = JSON.parse(event.data);
         if (data.error) {
           console.error(data.error);
-          eventSource.close();
           return;
         }
 
@@ -174,7 +211,7 @@ export default function RunPipeline() {
           })));
         }
 
-        if (data.logs) {
+        if (data.logs && Array.isArray(data.logs) && data.logs.length > 0) {
           setLogs(data.logs);
         }
       } catch (err) {
@@ -183,11 +220,11 @@ export default function RunPipeline() {
     };
 
     eventSource.onerror = (err) => {
-      console.error("EventSource failed:", err);
-      eventSource.close();
+      console.error("EventSource connection issue, relying on REST polling:", err);
     };
 
     return () => {
+      clearInterval(pollInterval);
       eventSource.close();
     };
   }, [id]);
