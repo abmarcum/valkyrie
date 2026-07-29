@@ -77,6 +77,8 @@ interface SystemSettings {
 }
 
 function loadSettings(): SystemSettings {
+  const defaultOllamaHost = process.env.OLLAMA_IP || process.env.OLLAMA_HOST || "http://localhost:11434";
+
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const data = fs.readFileSync(SETTINGS_FILE, "utf-8");
@@ -85,10 +87,10 @@ function loadSettings(): SystemSettings {
       return {
         selectedModel: parsed.selectedModel || "qwen3-coder:latest",
         selectedProvider: parsed.selectedProvider || "ollama",
-        googleApiKey: parsed.googleApiKey || "",
-        anthropicApiKey: parsed.anthropicApiKey || "",
-        openaiApiKey: parsed.openaiApiKey || "",
-        ollamaIp: parsed.ollamaIp || "http://localhost:11434"
+        googleApiKey: process.env.GEMINI_API_KEY || parsed.googleApiKey || "",
+        anthropicApiKey: process.env.ANTHROPIC_API_KEY || parsed.anthropicApiKey || "",
+        openaiApiKey: process.env.OPENAI_API_KEY || parsed.openaiApiKey || "",
+        ollamaIp: parsed.ollamaIp || defaultOllamaHost
       };
     }
   } catch (e) {
@@ -97,10 +99,10 @@ function loadSettings(): SystemSettings {
   return {
     selectedModel: "qwen3-coder:latest",
     selectedProvider: "ollama",
-    googleApiKey: "",
-    anthropicApiKey: "",
-    openaiApiKey: "",
-    ollamaIp: "http://localhost:11434"
+    googleApiKey: process.env.GEMINI_API_KEY || "",
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
+    openaiApiKey: process.env.OPENAI_API_KEY || "",
+    ollamaIp: defaultOllamaHost
   };
 }
 

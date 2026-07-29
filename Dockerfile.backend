@@ -2,8 +2,8 @@ FROM node:24-bookworm-slim
 
 WORKDIR /app
 
-# Install OpenSSL required by Prisma query engine
-RUN apt-get update -y && apt-get install -y openssl ca-certificates
+# Install OpenSSL required by Prisma query engine and Git for VCS operations
+RUN apt-get update -y && apt-get install -y openssl ca-certificates git
 
 # Copy monorepo configuration and lockfiles
 COPY package.json package-lock.json tsconfig.json ./
