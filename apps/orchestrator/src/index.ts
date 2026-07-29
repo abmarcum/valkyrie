@@ -114,6 +114,50 @@ function saveSettings(settings: SystemSettings) {
   }
 }
 
+interface PersonaSpec {
+  id: string;
+  name: string;
+  description: string;
+  roleDefinition?: string;
+  responsibilities?: string[];
+  deliverables?: string[];
+  qualityCriteria?: string[];
+  systemPrompt: string;
+  temperature?: number;
+}
+
+function getPersonaSystemPrompt(agentIdOrName: string): string {
+  try {
+    const agentsPath = path.join(__dirname, "../../../personas/agents.json");
+    if (fs.existsSync(agentsPath)) {
+      const data = JSON.parse(fs.readFileSync(agentsPath, "utf-8"));
+      const persona = data.personas.find((p: PersonaSpec) => 
+        p.id === agentIdOrName || p.name.toLowerCase() === agentIdOrName.toLowerCase()
+      );
+
+      if (persona) {
+        let prompt = persona.systemPrompt;
+        if (persona.roleDefinition) {
+          prompt += `\n\nROLE DEFINITION:\n${persona.roleDefinition}`;
+        }
+        if (persona.responsibilities && persona.responsibilities.length > 0) {
+          prompt += `\n\nCORE RESPONSIBILITIES:\n${persona.responsibilities.map((r: string) => `- ${r}`).join("\n")}`;
+        }
+        if (persona.deliverables && persona.deliverables.length > 0) {
+          prompt += `\n\nEXPECTED DELIVERABLES:\n${persona.deliverables.map((d: string) => `- ${d}`).join("\n")}`;
+        }
+        if (persona.qualityCriteria && persona.qualityCriteria.length > 0) {
+          prompt += `\n\nQUALITY CRITERIA:\n${persona.qualityCriteria.map((q: string) => `- ${q}`).join("\n")}`;
+        }
+        return prompt;
+      }
+    }
+  } catch (e) {
+    console.error("Failed to load persona specs:", e);
+  }
+  return `You are the ${agentIdOrName} Agent in a multi-agent application swarm. Synthesize clean, complete, production-grade output.`;
+}
+
 // Calculate cost based on provider rates
 function calculateLlmCost(promptTokens: number, completionTokens: number): { inputCost: number, outputCost: number, totalCost: number, inputRate: number, outputRate: number } {
   const settings = loadSettings();
@@ -855,7 +899,7 @@ async function runAgentPipeline(
         const response = await callGeminiWithRetry(
           apiKey,
           targetModel,
-          "You are the Product Manager in a multi-agent application swarm. Output a clear Product Requirements Document.",
+          getPersonaSystemPrompt("Product Manager"),
           pmPrompt,
           addLog,
           "Product Manager",
@@ -892,7 +936,7 @@ async function runAgentPipeline(
         const archResponse = await callGeminiWithRetry(
           apiKey,
           targetModel,
-          "You are the Software Architect in a multi-agent application swarm. Design directory scaffolding and file structures.",
+          getPersonaSystemPrompt("Software Architect"),
           archPrompt,
           addLog,
           "Software Architect",
@@ -923,11 +967,11 @@ async function runAgentPipeline(
           apiKey || "",
           targetModel,
           "Software Architect",
-          "You are the Software Architect in a multi-agent application swarm. Design directory scaffolding and file structures.",
+          getPersonaSystemPrompt("Software Architect"),
           archPrompt,
           archText,
           "Product Manager",
-          "You are the Product Manager in a multi-agent application swarm. Validate output documents against the requirements PRD.",
+          getPersonaSystemPrompt("Product Manager"),
           prd,
           projectId,
           addLog,
@@ -942,11 +986,11 @@ async function runAgentPipeline(
         // Live Data Architect call
         currentStatus = "DATA_DB";
         await addLog("Data Architect", "Outlining database schemas and storage models.", "info");
-        const dataPrompt = `Based on this PRD: ${prd} and System Architecture: ${archText}, design the database schemas, tables, indexes, and write migration scripts. Output clean database definition scripts, structured with path headers pointing to the data/ directory (e.g. ## data/schema.sql or ## data/migrations/V001__init.sql).`;
+        const dataPrompt = `Based on this PRD: ${prd} and System Architecture: ${archText}, assess if a persistent database is required. If NOT needed, output '[NO_DATABASE_REQUIRED]'. Otherwise, design the database schemas, tables, indexes, and write migration scripts. Output clean database definition scripts, structured with path headers pointing to the data/ directory (e.g. ## data/schema.sql or ## data/migrations/V001__init.sql).`;
         const dataResponse = await callGeminiWithRetry(
           apiKey,
           targetModel,
-          "You are the Data Architect in a multi-agent application swarm. Design database tables, schemas, indexes, and write migration scripts.",
+          getPersonaSystemPrompt("Data Architect"),
           dataPrompt,
           addLog,
           "Data Architect",
@@ -964,45 +1008,50 @@ async function runAgentPipeline(
         traceLlmCall("Data Architect", dataPrompt, dataText, dataInput, dataOutput);
         await updateCost(dataInput, dataOutput);
 
-        if (cohereClient) {
-          await addLog("Data Architect", "Invoking Cohere to refine and critique database schemas...", "info");
-          const refinement = await callCohereToCritique(cohereClient, dataText, "Data Architect");
-          dataText += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
+        if (dataText.includes("[NO_DATABASE_REQUIRED]")) {
+          await addLog("Data Architect", "No persistent database required for this stateless service. Skipping DB schema files.", "info");
+          dataText = "[NO_DATABASE_REQUIRED] No database storage required for this project.";
+        } else {
+          if (cohereClient) {
+            await addLog("Data Architect", "Invoking Cohere to refine and critique database schemas...", "info");
+            const refinement = await callCohereToCritique(cohereClient, dataText, "Data Architect");
+            dataText += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
+          }
+
+          if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
+
+          // PM Validation loop for Data Architect
+          dataText = await validateAndReviseResponse(
+            apiKey || "",
+            targetModel,
+            "Data Architect",
+            getPersonaSystemPrompt("Data Architect"),
+            dataPrompt,
+            dataText,
+            "Product Manager",
+            getPersonaSystemPrompt("Product Manager"),
+            prd,
+            projectId,
+            addLog,
+            useCache,
+            updateCost
+          );
+
+          // Scaffolding database files
+          writeProjectFiles(projectId, language, dataText || "-- Generated database schema", false);
+          await addLog("Data Architect", `Database schemas generated successfully:\n${dataText.substring(0, 150)}...`, "success");
+          writeDataFile(projectId, "database.md", dataText);
         }
-
-        if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-
-        // PM Validation loop for Data Architect
-        dataText = await validateAndReviseResponse(
-          apiKey || "",
-          targetModel,
-          "Data Architect",
-          "You are the Data Architect in a multi-agent application swarm. Design database tables, schemas, indexes, and write migration scripts.",
-          dataPrompt,
-          dataText,
-          "Product Manager",
-          "You are the Product Manager in a multi-agent application swarm. Validate output documents against the requirements PRD.",
-          prd,
-          projectId,
-          addLog,
-          useCache,
-          updateCost
-        );
-
-        // Scaffolding database files
-        writeProjectFiles(projectId, language, dataText || "-- Generated database schema", false);
-        await addLog("Data Architect", `Database schemas generated successfully:\n${dataText.substring(0, 150)}...`, "success");
-        writeDataFile(projectId, "database.md", dataText);
         completedStatuses.add("DATA_DB");
 
         // Live UI/UX Designer call
         currentStatus = "UI_DESIGN";
         await addLog("UI/UX Designer", "Drafting system page layouts and UI styling tokens.", "info");
-        const uiPrompt = `Based on this PRD: ${prd}, System Architecture: ${archText}, and DB models: ${dataText}, design the UI page layouts, component hierarchy, and CSS styling tokens.`;
+        const uiPrompt = `Based on this PRD: ${prd}, System Architecture: ${archText}, and DB models: ${dataText}, assess if a graphical UI is required. If NOT needed, output '[NO_UI_REQUIRED]'. Otherwise, design the UI page layouts, component hierarchy, and CSS styling tokens.`;
         const uiResponse = await callGeminiWithRetry(
           apiKey,
           targetModel,
-          "You are the UI/UX Designer in a multi-agent application swarm. Draft UI/UX page components, styles, layouts, and front-end interface mockups.",
+          getPersonaSystemPrompt("UI/UX Designer"),
           uiPrompt,
           addLog,
           "UI/UX Designer",
@@ -1020,34 +1069,40 @@ async function runAgentPipeline(
         traceLlmCall("UI/UX Designer", uiPrompt, uiText, uiInput, uiOutput);
         await updateCost(uiInput, uiOutput);
 
-        if (cohereClient) {
-          await addLog("UI/UX Designer", "Invoking Cohere to refine and critique UI layouts...", "info");
-          const refinement = await callCohereToCritique(cohereClient, uiText, "UI/UX Designer");
-          uiText += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
+        if (uiText.includes("[NO_UI_REQUIRED]")) {
+          await addLog("UI/UX Designer", "No graphical UI required for this project. Skipping frontend layout files.", "info");
+          uiText = "[NO_UI_REQUIRED] No frontend UI required for this project.";
+        } else {
+          if (cohereClient) {
+            await addLog("UI/UX Designer", "Invoking Cohere to refine and critique UI layouts...", "info");
+            const refinement = await callCohereToCritique(cohereClient, uiText, "UI/UX Designer");
+            uiText += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
+          }
+
+          if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
+
+          // PM Validation loop for UI/UX Designer
+          uiText = await validateAndReviseResponse(
+            apiKey || "",
+            targetModel,
+            "UI/UX Designer",
+            getPersonaSystemPrompt("UI/UX Designer"),
+            uiPrompt,
+            uiText,
+            "Product Manager",
+            getPersonaSystemPrompt("Product Manager"),
+            prd,
+            projectId,
+            addLog,
+            useCache,
+            updateCost
+          );
+
+          // Scaffolding UI files
+          writeProjectFiles(projectId, language, uiText || "/* Generated UI/UX styles */", false);
+          await addLog("UI/UX Designer", `UI/UX spec generated successfully:\n${uiText.substring(0, 150)}...`, "success");
+          writeDataFile(projectId, "ui_ux.md", uiText);
         }
-
-        if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-
-        // PM Validation loop for UI/UX Designer
-        uiText = await validateAndReviseResponse(
-          apiKey || "",
-          targetModel,
-          "UI/UX Designer",
-          "You are the UI/UX Designer in a multi-agent application swarm. Draft UI/UX page components, styles, layouts, and front-end interface mockups.",
-          uiPrompt,
-          uiText,
-          "Product Manager",
-          "You are the Product Manager in a multi-agent application swarm. Validate output documents against the requirements PRD.",
-          prd,
-          projectId,
-          addLog,
-          useCache,
-          updateCost
-        );
-
-        // Scaffolding UI files
-        writeProjectFiles(projectId, language, uiText || "/* Generated UI/UX styles */", false);
-        await addLog("UI/UX Designer", `UI/UX spec generated successfully:\n${uiText.substring(0, 150)}...`, "success");
         writeDocFile(projectId, "ui_ux.md", uiText);
         completedStatuses.add("UI_DESIGN");
 
@@ -1075,7 +1130,7 @@ Output clean, fully functioning, and well-documented source code files, structur
         const codeResponse = await callGeminiWithRetry(
           apiKey,
           targetModel,
-          "You are the Developer Agent in a multi-agent application swarm. Synthesize clean, working code files for the requirements.",
+          getPersonaSystemPrompt("Developer Agent"),
           devPrompt,
           addLog,
           "Developer Agent",
@@ -1106,11 +1161,11 @@ Output clean, fully functioning, and well-documented source code files, structur
           apiKey || "",
           targetModel,
           "Developer Agent",
-          "You are the Developer Agent in a multi-agent application swarm. Synthesize clean, working code files for the requirements.",
+          getPersonaSystemPrompt("Developer Agent"),
           devPrompt,
           codeText,
           "Software Architect",
-          "You are the Software Architect in a multi-agent application swarm. Design directory scaffolding and file structures.",
+          getPersonaSystemPrompt("Software Architect"),
           `System PRD Requirements:\n${prd}\n\nSystem Scaffolding & Directory Architecture:\n${archText}`,
           projectId,
           addLog,
@@ -1126,11 +1181,11 @@ Output clean, fully functioning, and well-documented source code files, structur
           apiKey || "",
           targetModel,
           "Developer Agent",
-          "You are the Developer Agent in a multi-agent application swarm. Synthesize clean, working code files for the requirements.",
+          getPersonaSystemPrompt("Developer Agent"),
           devPrompt,
           codeText,
           "Security Architect",
-          "You are the Security Architect Agent. Review code architectures, API endpoints, user inputs, database queries, and deployment settings. Audit them against security practices (OWASP Top 10, SQL injection, XSS, CSRF, dependency vulnerabilities, secrets management, and encryption). Identify flaws and suggest revisions.",
+          getPersonaSystemPrompt("Security Architect"),
           "Validate the code does not contain any security vulnerabilities, hardcoded secrets, SQL injections, XSS vulnerabilities, insecure authentication pathways, or directory traversals. Review every single code block carefully.",
           projectId,
           addLog,
@@ -1164,7 +1219,7 @@ Structure each document with path headers (e.g. ## README.md or ## docs/api.md) 
         const writerResponse = await callGeminiWithRetry(
           apiKey,
           targetModel,
-          "You are the Technical Writer in a multi-agent application swarm. Synthesize professional markdown documentation manuals for software codebases.",
+          getPersonaSystemPrompt("Tech Writer"),
           writerPrompt,
           addLog,
           "Tech Writer",
@@ -1195,11 +1250,11 @@ Structure each document with path headers (e.g. ## README.md or ## docs/api.md) 
           apiKey || "",
           targetModel,
           "Tech Writer",
-          "You are the Technical Writer in a multi-agent application swarm. Synthesize professional markdown documentation manuals for software codebases.",
+          getPersonaSystemPrompt("Tech Writer"),
           writerPrompt,
           docText,
           "Product Manager",
-          "You are the Product Manager in a multi-agent application swarm. Validate output documents against the requirements PRD.",
+          getPersonaSystemPrompt("Product Manager"),
           prd,
           projectId,
           addLog,
