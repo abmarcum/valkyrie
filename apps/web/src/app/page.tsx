@@ -52,7 +52,7 @@ export default function Home() {
             href="/admin"
             className="px-8 py-4 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 font-semibold transition-all flex items-center justify-center text-base"
           >
-            Analyze AI Cost & Logs
+            Admin Control Panel
           </a>
         </div>
 

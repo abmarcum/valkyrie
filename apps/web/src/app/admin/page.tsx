@@ -4,13 +4,6 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { ORCHESTRATOR_URL } from "@/lib/config";
 
-interface AgentCost {
-  role: string;
-  tokensUsed: number;
-  costUSD: number;
-  color: string;
-}
-
 interface UserSession {
   username: string;
   role: string;
@@ -78,31 +71,7 @@ export default function AdminDashboard() {
   const [newUserTenantId, setNewUserTenantId] = useState("");
   const [creatingUser, setCreatingUser] = useState(false);
 
-  const [agentCosts, setAgentCosts] = useState<AgentCost[]>([
-    { role: "Product Manager", tokensUsed: 125000, costUSD: 1.88, color: "bg-blue-500" },
-    { role: "Software Architect", tokensUsed: 240000, costUSD: 3.60, color: "bg-indigo-500" },
-    { role: "UI/UX Designer", tokensUsed: 180000, costUSD: 2.70, color: "bg-purple-500" },
-    { role: "Data Architect", tokensUsed: 95000, costUSD: 1.43, color: "bg-pink-500" },
-    { role: "AI/ML Engineer", tokensUsed: 310000, costUSD: 4.65, color: "bg-violet-500" },
-    { role: "Security Architect", tokensUsed: 210000, costUSD: 3.15, color: "bg-red-500" },
-    { role: "Tech Writer", tokensUsed: 150000, costUSD: 2.25, color: "bg-amber-500" },
-    { role: "SRE", tokensUsed: 175000, costUSD: 2.63, color: "bg-teal-500" },
-    { role: "QA Engineer", tokensUsed: 290000, costUSD: 4.35, color: "bg-emerald-500" },
-  ]);
-
   const [projectCount, setProjectCount] = useState(0);
-
-  const colorsMap: Record<string, string> = {
-    "Product Manager": "bg-blue-500",
-    "Software Architect": "bg-indigo-500",
-    "UI/UX Designer": "bg-purple-500",
-    "Data Architect": "bg-pink-500",
-    "AI/ML Engineer": "bg-violet-500",
-    "Security Architect": "bg-red-500",
-    "Tech Writer": "bg-amber-500",
-    "SRE": "bg-teal-500",
-    "QA Engineer": "bg-emerald-500",
-  };
 
   const getSession = (): UserSession | null => {
     if (typeof window === "undefined") return null;
@@ -310,14 +279,6 @@ export default function AdminDashboard() {
       if (response.ok) {
         const data = await response.json();
         setProjectCount(data.projectCount);
-        if (data.agentCosts) {
-          setAgentCosts(data.agentCosts.map((c: any) => ({
-            role: c.role,
-            tokensUsed: c.tokensUsed,
-            costUSD: c.costUSD,
-            color: colorsMap[c.role] || "bg-slate-500"
-          })));
-        }
       } else if (response.status === 401 || response.status === 403) {
         router.push("/dashboard");
       }
@@ -349,14 +310,10 @@ export default function AdminDashboard() {
       return () => clearInterval(interval);
     }
   }, [router]);
-
   const handleLogout = () => {
     localStorage.removeItem("token");
     router.push("/login");
   };
-
-  const totalCost = agentCosts.reduce((acc, curr) => acc + curr.costUSD, 0);
-  const totalTokens = agentCosts.reduce((acc, curr) => acc + curr.tokensUsed, 0);
 
   if (!user || user.role !== "admin") {
     return (
@@ -750,62 +707,6 @@ export default function AdminDashboard() {
             </div>
           </section>
         )}
-
-        {/* Row 2: Metrics Dashboard */}
-        <section className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm shadow-xl">
-          <div className="flex justify-between items-center mb-8">
-            <div>
-              <h2 className="text-2xl font-bold text-slate-100">AI Cost Analysis</h2>
-              <p className="text-slate-400 text-sm">Aggregated metrics detailing tokens consumed and USD expenditure across your agent swarms.</p>
-            </div>
-            <div className="text-right">
-              <p className="text-3xl font-extrabold text-violet-400">${totalCost.toFixed(2)}</p>
-              <p className="text-xs text-slate-500">{totalTokens.toLocaleString()} Total Tokens</p>
-            </div>
-          </div>
-
-          {/* Graphical Cost Breakdown */}
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">Expenditure Contribution by Agent Persona</h3>
-              
-              {/* Cost bar representation */}
-              <div className="w-full h-4 bg-slate-950 rounded-full overflow-hidden flex">
-                {agentCosts.map((agent) => {
-                  const percentage = totalCost > 0 ? (agent.costUSD / totalCost) * 100 : 0;
-                  return (
-                    <div
-                      key={agent.role}
-                      className={`${agent.color} h-full`}
-                      style={{ width: `${percentage}%` }}
-                      title={`${agent.role}: $${agent.costUSD.toFixed(2)} (${percentage.toFixed(1)}%)`}
-                    />
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* List details */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-4">
-              {agentCosts.map((agent) => (
-                <div key={agent.role} className="flex items-center space-x-4 bg-slate-950/40 border border-slate-800 p-4 rounded-xl">
-                  <div className={`w-3 h-3 rounded-full ${agent.color}`} />
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold text-slate-200">{agent.role}</p>
-                    <p className="text-xs text-slate-500">{agent.tokensUsed.toLocaleString()} tokens</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-slate-100">${agent.costUSD.toFixed(2)}</p>
-                    <p className="text-[10px] text-slate-500">
-                      {totalCost > 0 ? ((agent.costUSD / totalCost) * 100).toFixed(1) : 0}%
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
       </main>
     </div>
   );
