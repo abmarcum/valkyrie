@@ -691,11 +691,12 @@ async function callGeminiWithRetry(
           headers: {
             "Content-Type": "application/json",
             "x-api-key": anthropicKey,
-            "anthropic-version": "2023-06-01"
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta": "max-tokens-3-5-sonnet-2024-07-15"
           },
           body: JSON.stringify({
             model: activeModel,
-            max_tokens: 4096,
+            max_tokens: 8192,
             system: systemPrompt,
             messages: [{ role: "user", content: userPrompt }]
           })
