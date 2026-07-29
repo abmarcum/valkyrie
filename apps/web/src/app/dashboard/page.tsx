@@ -47,10 +47,10 @@ export default function Dashboard() {
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [language, setLanguage] = useState("typescript");
-  const [cloud, setCloud] = useState("aws");
-  const [dbPlatform, setDbPlatform] = useState("postgresql");
-  const [failover, setFailover] = useState("multi-zone");
+  const [language, setLanguage] = useState("go");
+  const [cloud, setCloud] = useState("onprem");
+  const [dbPlatform, setDbPlatform] = useState("none");
+  const [failover, setFailover] = useState("basic");
   const [vcsRepo, setVcsRepo] = useState("");
   const [vcsAuthType, setVcsAuthType] = useState("personal_access_token");
   const [githubInstallationId, setGithubInstallationId] = useState("");
@@ -462,23 +462,25 @@ export default function Dashboard() {
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors disabled:opacity-50"
                   disabled={isViewer}
                 >
+                  <option value="go">Go (Fiber/Gin)</option>
                   <option value="typescript">TypeScript (Next.js/Node)</option>
                   <option value="python">Python (FastAPI/Django)</option>
-                  <option value="go">Go (Fiber/Gin)</option>
+                  <option value="java">Java (Spring Boot / Maven)</option>
+                  <option value="cpp">C++ (CMake / STL)</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Target Cloud Platform</label>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Target Platform</label>
                 <select
                   value={cloud}
                   onChange={(e) => setCloud(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors disabled:opacity-50"
                   disabled={isViewer}
                 >
+                  <option value="onprem">On-Premises (Docker/K8s)</option>
                   <option value="aws">Amazon Web Services (AWS)</option>
                   <option value="gcp">Google Cloud Platform (GCP)</option>
-                  <option value="onprem">On-Premises (Docker/K8s)</option>
                 </select>
               </div>
 
@@ -490,6 +492,7 @@ export default function Dashboard() {
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors disabled:opacity-50"
                   disabled={isViewer}
                 >
+                  <option value="none">None (Stateless / In-Memory)</option>
                   <option value="postgresql">PostgreSQL (Relational)</option>
                   <option value="mongodb">MongoDB (Document)</option>
                   <option value="redis">Redis (In-Memory Key/Value)</option>
@@ -504,9 +507,9 @@ export default function Dashboard() {
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors disabled:opacity-50"
                   disabled={isViewer}
                 >
+                  <option value="basic">Single Instance with Auto-Restart</option>
                   <option value="multi-zone">Multi-Availability Zone (Active-Active)</option>
                   <option value="region">Multi-Region Replication</option>
-                  <option value="basic">Single Instance with Auto-Restart</option>
                 </select>
               </div>
             </div>
