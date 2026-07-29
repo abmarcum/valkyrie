@@ -1233,6 +1233,11 @@ Return JSON ONLY in the format:
           manifestJsonText = (manifestRes.content[0] as any).text;
         }
 
+        const manifestInput = manifestRes.usage?.input_tokens;
+        const manifestOutput = manifestRes.usage?.output_tokens;
+        traceLlmCall("Developer Agent", manifestPrompt, manifestJsonText, manifestInput, manifestOutput);
+        await updateCost(manifestInput, manifestOutput);
+
         let targetFileList: Array<{ path: string; description: string }> = [];
         try {
           const cleanedJson = extractJsonBlock(manifestJsonText);
@@ -1340,6 +1345,7 @@ Do NOT leave the response empty. Output clean code structured with path header:
             }
             const fInput = fileRes.usage?.input_tokens;
             const fOutput = fileRes.usage?.output_tokens;
+            traceLlmCall("Developer Agent", filePrompt, fileCode, fInput, fOutput);
             await updateCost(fInput, fOutput);
 
             let cleanModuleCode = fileCode.trim();
@@ -1370,6 +1376,10 @@ Do NOT leave the response empty. Output clean code structured with path header:
           if (codeResponse.content && codeResponse.content[0] && "text" in codeResponse.content[0]) {
             codeText = (codeResponse.content[0] as any).text;
           }
+          const codeInput = codeResponse.usage?.input_tokens;
+          const codeOutput = codeResponse.usage?.output_tokens;
+          traceLlmCall("Developer Agent", devPrompt, codeText, codeInput, codeOutput);
+          await updateCost(codeInput, codeOutput);
           writeProjectFiles(projectId, language, codeText, false);
         }
 
