@@ -144,7 +144,7 @@ function getPersonaSystemPrompt(agentIdOrName: string): string {
     const agentsPath = path.join(__dirname, "../../../personas/agents.json");
     if (fs.existsSync(agentsPath)) {
       const data = JSON.parse(fs.readFileSync(agentsPath, "utf-8"));
-      const persona = data.personas.find((p: PersonaSpec) => 
+      const persona = data.personas.find((p: PersonaSpec) =>
         p.id === agentIdOrName || p.name.toLowerCase() === agentIdOrName.toLowerCase()
       );
 
@@ -175,10 +175,10 @@ function getPersonaSystemPrompt(agentIdOrName: string): string {
 function calculateLlmCost(promptTokens: number, completionTokens: number): { inputCost: number, outputCost: number, totalCost: number, inputRate: number, outputRate: number } {
   const settings = loadSettings();
   const provider = settings.selectedProvider || "google";
-  
+
   let inputRate = 0.075;
   let outputRate = 0.30;
-  
+
   if (provider === "anthropic") {
     inputRate = 3.00;
     outputRate = 15.00;
@@ -189,11 +189,11 @@ function calculateLlmCost(promptTokens: number, completionTokens: number): { inp
     inputRate = 0.0;
     outputRate = 0.0;
   }
-  
+
   const inputCost = Number(((promptTokens * inputRate) / 1000000).toFixed(6));
   const outputCost = Number(((completionTokens * outputRate) / 1000000).toFixed(6));
   const totalCost = Number((inputCost + outputCost).toFixed(6));
-  
+
   return { inputCost, outputCost, totalCost, inputRate, outputRate };
 }
 
@@ -295,7 +295,7 @@ app.post("/oauth/token", async (req: FastifyRequest, reply: FastifyReply) => {
     let user = await prisma.user.findUnique({
       where: { email: `${username}@valkyrie.app` }
     });
-    
+
     if (!user) {
       user = await prisma.user.create({
         data: {
@@ -349,7 +349,7 @@ app.post("/api/admin/settings", { preHandler: [authMiddleware, requireRole(["adm
   if (!selectedModel || !selectedProvider) {
     return reply.status(400).send({ error: "selectedModel and selectedProvider are required" });
   }
-  
+
   const settings = loadSettings();
   settings.selectedModel = selectedModel;
   settings.selectedProvider = selectedProvider;
@@ -381,7 +381,7 @@ app.post("/api/projects/:id/llm", async (req: FastifyRequest, reply: FastifyRepl
       targetModel,
       systemPrompt,
       userPrompt,
-      () => {}, // No-op logger for runner proxy
+      () => { }, // No-op logger for runner proxy
       agentName || "QA Runner Agent Proxy",
       id,
       false // Do not cache runner assertions
@@ -458,7 +458,7 @@ app.post("/api/admin/users", { preHandler: [authMiddleware, requireRole(["admin"
     if (!tenant) {
       return reply.status(404).send({ error: `Company with ID '${tenantId}' not found.` });
     }
-    
+
     const user = await prisma.user.create({
       data: {
         id: email.split("@")[0] + "_" + Math.random().toString(36).substring(2, 5),
@@ -595,7 +595,7 @@ async function callGeminiWithRetry(
           cachedResponse = JSON.parse(dbCache.analysisResult);
           agentResponseCache.set(cacheKey, cachedResponse);
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     if (cachedResponse) {
@@ -745,7 +745,7 @@ async function callGeminiWithRetry(
             analysisResult: JSON.stringify(mapped)
           }
         });
-      } catch (e) {}
+      } catch (e) { }
 
       return mapped;
     } catch (err: any) {
@@ -838,10 +838,10 @@ async function runAgentPipeline(
       message,
       type
     });
-    
+
     // Debug logging to the Node console
     console.log(`[ValkyrieSwarm] [${agent}] [${type.toUpperCase()}] ${message}`);
-    
+
     // Update DB
     await prisma.agentRun.update({
       where: { id: projectId },
@@ -923,7 +923,7 @@ async function runAgentPipeline(
       try {
         const settings = loadSettings();
         const targetModel = settings.selectedModel || "gemini-3.5-flash";
-        
+
         if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
 
         // Live PM call
@@ -938,12 +938,12 @@ async function runAgentPipeline(
           projectId,
           useCache
         );
-        
+
         let prd = "";
         if (response.content && response.content[0] && "text" in response.content[0]) {
           prd = (response.content[0] as any).text;
         }
-        
+
         const pmInput = response.usage?.input_tokens;
         const pmOutput = response.usage?.output_tokens;
         traceLlmCall("Product Manager", pmPrompt, prd, pmInput, pmOutput);
@@ -975,12 +975,12 @@ async function runAgentPipeline(
           projectId,
           useCache
         );
-        
+
         let archText = "";
         if (archResponse.content && archResponse.content[0] && "text" in archResponse.content[0]) {
           archText = (archResponse.content[0] as any).text;
         }
-        
+
         const archInput = archResponse.usage?.input_tokens;
         const archOutput = archResponse.usage?.output_tokens;
         traceLlmCall("Software Architect", archPrompt, archText, archInput, archOutput);
@@ -1029,12 +1029,12 @@ async function runAgentPipeline(
           projectId,
           useCache
         );
-        
+
         let dataText = "";
         if (dataResponse.content && dataResponse.content[0] && "text" in dataResponse.content[0]) {
           dataText = (dataResponse.content[0] as any).text;
         }
-        
+
         const dataInput = dataResponse.usage?.input_tokens;
         const dataOutput = dataResponse.usage?.output_tokens;
         traceLlmCall("Data Architect", dataPrompt, dataText, dataInput, dataOutput);
@@ -1090,12 +1090,12 @@ async function runAgentPipeline(
           projectId,
           useCache
         );
-        
+
         let uiText = "";
         if (uiResponse.content && uiResponse.content[0] && "text" in uiResponse.content[0]) {
           uiText = (uiResponse.content[0] as any).text;
         }
-        
+
         const uiInput = uiResponse.usage?.input_tokens;
         const uiOutput = uiResponse.usage?.output_tokens;
         traceLlmCall("UI/UX Designer", uiPrompt, uiText, uiInput, uiOutput);
@@ -1158,7 +1158,7 @@ ${uiText}
 Ensure that any database/schema related source code files (such as SQL tables, DB migrations, model entities) are stored in the data/ directory.
 Ensure that any code written is properly and thoroughly documented. Include comprehensive docstrings, inline comments, variable descriptions, and API parameter details.
 Output clean, fully functioning, and well-documented source code files, structured with path headers (e.g. ## path/to/file).`;
-        
+
         const codeResponse = await callGeminiWithRetry(
           apiKey,
           targetModel,
@@ -1169,12 +1169,12 @@ Output clean, fully functioning, and well-documented source code files, structur
           projectId,
           useCache
         );
-        
+
         let codeText = "";
         if (codeResponse.content && codeResponse.content[0] && "text" in codeResponse.content[0]) {
           codeText = (codeResponse.content[0] as any).text;
         }
-        
+
         const codeInput = codeResponse.usage?.input_tokens;
         const codeOutput = codeResponse.usage?.output_tokens;
         traceLlmCall("Developer Agent", devPrompt, codeText, codeInput, codeOutput);
@@ -1208,7 +1208,7 @@ Output clean, fully functioning, and well-documented source code files, structur
         // Live Security Architect Audit
         currentStatus = "AUDITING";
         await addLog("Security Architect", "Auditing application code for security vulnerabilities, secrets leakage, and compliance...", "info");
-        
+
         codeText = await validateAndReviseResponse(
           apiKey || "",
           targetModel,
@@ -1296,6 +1296,17 @@ Structure each document with path headers (e.g. ## README.md or ## docs/api.md) 
 
         // Write documentation files into generated folder
         writeProjectFiles(projectId, language, docText || "# Documentation", false);
+
+        // Safeguard: Ensure root README.md exists before pushing to Git
+        const readmePath = path.join(__dirname, `../../../generated/${projectId}/README.md`);
+        if (!fs.existsSync(readmePath)) {
+          const defaultReadme = docText && docText.trim().length > 0
+            ? docText.trim()
+            : `# ${projectName || 'Valkyrie Project'}\n\nGenerated by Valkyrie Multi-Agent Swarm.`;
+          fs.writeFileSync(readmePath, defaultReadme + "\n");
+          console.log(`[ValkyrieDoc] Root README.md guaranteed on disk.`);
+        }
+
         await addLog("Tech Writer", "Documentation generated successfully. README and API files saved to disk.", "success");
 
         // Git Commit & GitHub push integration
@@ -1320,7 +1331,7 @@ Structure each document with path headers (e.g. ## README.md or ## docs/api.md) 
     // Set QA runner active status
     currentStatus = "QA_LOOP";
     await addLog("QA Engineer (Runner)", "Scaffold files prepared. Awaiting local QA runner testing...", "info");
-    
+
     await prisma.agentRun.update({
       where: { id: projectId },
       data: {
@@ -1331,7 +1342,7 @@ Structure each document with path headers (e.g. ## README.md or ## docs/api.md) 
     if (err.message === "SWARM_CANCELLED") {
       await addLog("System", "Swarm pipeline execution cancelled by user.", "warning");
       cancelledRuns.delete(projectId);
-      
+
       await prisma.agentRun.update({
         where: { id: projectId },
         data: {
@@ -1344,37 +1355,46 @@ Structure each document with path headers (e.g. ## README.md or ## docs/api.md) 
   }
 }
 
-// Fallback logic if Gemini credentials are not supplied
+// Fallback logic if Gemini/Anthropic credentials fail or encounter continuous API limits
 async function fallbackPipeline(projectId: string, language: string, addLog: any, completedStatuses: Set<string>, vcsRepo?: string) {
   // Step 1: Architect
   await new Promise(r => setTimeout(r, 2000));
   if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-  writeDocFile(projectId, "prd.md", "# Product Requirements Document\nMock PM specifications requirements.");
-  writeDocFile(projectId, "architecture.md", "# System Architecture\nMock structure tree and module boundaries specs.");
-  await addLog("Software Architect", "Structure designed. Framework selection: standard TS module resolution config.", "success");
+  writeDocFile(projectId, "prd.md", "# Product Requirements Document\nScaffolded specifications and system requirements.");
+  writeDocFile(projectId, "architecture.md", "# System Architecture\nScaffolded structure tree and module boundaries.");
+  await addLog("Software Architect", "Structure designed. Framework selection complete.", "success");
   completedStatuses.add("PM_PRD");
   completedStatuses.add("ARCHITECTING");
 
   // Step 2: Data
   await new Promise(r => setTimeout(r, 2000));
   if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-  writeDocFile(projectId, "database.md", "# Database Schema Specs\nMock schemas and DB tables layout.");
-  await addLog("Data Architect", "Schema initialized. DB platforms configured with correct migration paths.", "success");
+  writeDataFile(projectId, "database.md", "# Database Schema Specs\nScaffolded database tables and data models.");
+  await addLog("Data Architect", "Schema initialized.", "success");
   completedStatuses.add("DATA_DB");
 
   // Step 3: UI
   await new Promise(r => setTimeout(r, 2000));
   if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-  writeDocFile(projectId, "ui_ux.md", "# UI/UX Layout Specification\nMock styling components and frontend views.");
-  await addLog("UI/UX Designer", "Responsive styling tokens generated. Output directory outlines.", "success");
+  writeDataFile(projectId, "ui_ux.md", "# UI/UX Layout Specification\nScaffolded component styling tokens.");
+  await addLog("UI/UX Designer", "Responsive styling tokens generated.", "success");
   completedStatuses.add("UI_DESIGN");
 
   // Step 4: Developer
   await new Promise(r => setTimeout(r, 2500));
   if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-  writeProjectFiles(projectId, language, "console.log('Valkyrie generated service running.');");
-  await addLog("Developer Agent", "Source code synthesized. Committed initial files to local workspace.", "success");
   
+  const codeTemplates: Record<string, string> = {
+    go: `package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("Valkyrie Generated Service Running")\n}`,
+    python: `def main():\n    print("Valkyrie Generated Service Running")\n\nif __name__ == "__main__":\n    main()`,
+    typescript: `console.log("Valkyrie Generated Service Running");`,
+    java: `public class Main {\n    public static void main(String[] args) {\n        System.out.println("Valkyrie Generated Service Running");\n    }\n}`,
+    cpp: `#include <iostream>\n\nint main() {\n    std::cout << "Valkyrie Generated Service Running" << std::endl;\n    return 0;\n}`
+  };
+  const code = codeTemplates[language.toLowerCase()] || codeTemplates.go;
+  writeProjectFiles(projectId, language, code);
+  await addLog("Developer Agent", "Source code synthesized.", "success");
+
   if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
 
   // Git Commit & GitHub push integration
@@ -1387,26 +1407,28 @@ async function fallbackPipeline(projectId: string, language: string, addLog: any
   // Step 5: Tech Writer
   await new Promise(r => setTimeout(r, 1500));
   if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-  writeProjectFiles(projectId, language, "## README.md\n\n# Valkyrie Project\nThis is a mock project.");
-  writeDocFile(projectId, "api.md", "# API Specs\nMock endpoint documentation.");
-  await addLog("Tech Writer", "System documentation generated successfully (README.md, docs/api.md saved).", "success");
+  writeDocFile(projectId, "README.md", `# Valkyrie Generated Project\n\nThis repository was scaffolded by the Valkyrie multi-agent swarm.`);
+  writeDocFile(projectId, "api.md", "# API Documentation\n\nScaffolded endpoint API specification.");
+  await addLog("Tech Writer", "System documentation generated successfully.", "success");
   completedStatuses.add("DOCUMENTING");
 }
 
 // Helper function to write documentation files directly to docs/ folder
 function writeDocFile(projectId: string, filename: string, content: string) {
+  if (!content || content.trim() === "") return;
   const dirPath = path.join(__dirname, `../../../generated/${projectId}/docs`);
   fs.mkdirSync(dirPath, { recursive: true });
-  fs.writeFileSync(path.join(dirPath, filename), content);
+  fs.writeFileSync(path.join(dirPath, filename), content.trim() + "\n");
   console.log(`[ValkyrieDoc] Saved doc: docs/${filename}`);
 }
 
 // Helper function to write schema/db files directly to data/ folder
 function writeDataFile(projectId: string, filename: string, content: string) {
+  if (!content || content.trim() === "") return;
   const dirPath = path.join(__dirname, `../../../generated/${projectId}/data`);
   fs.mkdirSync(dirPath, { recursive: true });
-  fs.writeFileSync(path.join(dirPath, filename), content);
-console.log(`[ValkyrieData] Saved database artifact: data/${filename}`);
+  fs.writeFileSync(path.join(dirPath, filename), content.trim() + "\n");
+  console.log(`[ValkyrieData] Saved database artifact: data/${filename}`);
 }
 
 // Validation loop helper querying a reviewer agent (e.g. PM or Software Architect) to critique and apply corrections
@@ -1430,7 +1452,7 @@ async function validateAndReviseResponse(
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
     await addLog(reviewerName, `Validating ${agentName}'s output against the specifications (Attempt ${iteration}/${maxIterations})...`, "info");
-    
+
     const validationPrompt = `You are the ${reviewerName} in a multi-agent application swarm.
 Review the following work generated by the ${agentName} against the system specifications.
 
@@ -1520,7 +1542,7 @@ function isValidFilePath(filePath: string): boolean {
   const clean = filePath.trim().replace(/^[`'"]+|[`'"]+$/g, "").replace(/[:]$/, "");
   if (!clean || clean.startsWith("#") || clean.startsWith("-") || clean.includes("..")) return false;
   if (clean.includes(" ") || clean.includes("*") || clean.includes("<") || clean.includes(">")) return false;
-  
+
   const base = path.basename(clean).toLowerCase();
   const knownFiles = new Set(["dockerfile", "makefile", "license", "go.mod", "go.sum", "package.json", "tsconfig.json", "requirements.txt", "readme.md"]);
   if (knownFiles.has(base)) return true;
@@ -1635,7 +1657,7 @@ function writeProjectFiles(projectId: string, language: string, content: string,
     const testContent = language.toLowerCase() === "typescript"
       ? `console.log("Running unit tests...");\nif (Math.random() > 0.5) { console.error("Error: Expected Transaction currency to be USD"); process.exit(1); } else { console.log("All assertions passed!"); process.exit(0); }`
       : `import random; print("Running tests..."); exit(1 if random.random() > 0.5 else 0)`;
-    
+
     fs.writeFileSync(path.join(dirPath, testFilename), testContent);
     console.log(`[ValkyrieParser] Wrote dummy unit test: ${testFilename}`);
   }
@@ -1673,7 +1695,7 @@ app.get("/api/projects/:id/stream", { preHandler: [authMiddleware] }, async (req
         logs: JSON.parse(run.logs as string)
       })}\n\n`);
     }
-  } catch (e) {}
+  } catch (e) { }
 
   req.raw.on("close", () => {
     const clients = sseClients.get(projectId) || [];
@@ -1695,7 +1717,7 @@ app.get("/api/projects/:id/run", { preHandler: [authMiddleware] }, async (req: F
     let parsedLogs = [];
     try {
       parsedLogs = JSON.parse((run.logs as string) || "[]");
-    } catch (e) {}
+    } catch (e) { }
 
     return reply.send({
       projectId,
@@ -1825,7 +1847,7 @@ app.post("/api/projects/:id/cancel", { preHandler: [authMiddleware, requireRole(
   const projectId = (req.params as any).id;
   try {
     cancelledRuns.add(projectId);
-    
+
     await prisma.agentRun.update({
       where: { id: projectId },
       data: { status: "CANCELLED" }
@@ -1901,7 +1923,7 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
 
   try {
     const files = getFilesRecursively(dirPath);
-    
+
     let codebasePrompt = "You are the Developer Agent in a multi-agent application swarm. A bug was found in the generated codebase.\n\n";
     codebasePrompt += "Here is the current codebase:\n";
     files.forEach(f => {
@@ -1974,7 +1996,7 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
       try {
         const logsArr = JSON.parse(run.logs as string);
         const issueLogs = logsArr.filter((l: any) => l.message && l.message.includes("GitHub Bug Issue #"));
-        
+
         const closedIssueNumbers = new Set<number>();
         for (const log of issueLogs) {
           const match = log.message.match(/#(\d+)/);
@@ -1984,7 +2006,7 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
               continue;
             }
             closedIssueNumbers.add(issueNumber);
-            
+
             await addFixLog("Developer Agent", `Updating GitHub Bug Issue #${issueNumber}...`, "info");
             let commentBody = `The Developer Agent has successfully resolved the reported test suite failures and committed the fix in project run ${projectId}.\n\n### Commit Result\n${pushResult.message}`;
             if ((pushResult as any).commitLink) {
@@ -2008,7 +2030,7 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
     }
 
     await addFixLog("Developer Agent", "Code fixes successfully applied. File updates committed to workspace. Re-triggering QA runner loop.", "success");
-    
+
     await prisma.agentRun.update({
       where: { id: projectId },
       data: { status: "QA_LOOP" }
@@ -2057,7 +2079,7 @@ app.post("/api/projects/:id/qa-report", async (req: FastifyRequest, reply: Fasti
           cleanError = firstLine.length > 80 ? firstLine.substring(0, 80) + "..." : firstLine;
         }
         const issueTitle = `[QA Runner Bug] ${cleanError} (Project: ${run.project.name})`;
-        
+
         const issueBody = `The Valkyrie QA Runner has detected a test suite failure.
 
 ### Error Details (stderr / execution failure)
@@ -2069,15 +2091,15 @@ ${errors && errors.length > 0 ? errors.join("\n") : "(No errors reported)"}
 \`\`\`
 ${logs && logs.length > 0 ? logs.join("\n") : "(No stdout output)"}
 \`\`\``;
-        
+
         const issueResult = await createGithubIssue(run.project.vcsRepoUrl || "", issueTitle, issueBody);
         if (issueResult.success && issueResult.issueNumber) {
           const isDuplicate = issueResult.message.includes("Duplicate");
           updatedLogs.push({
             timestamp: new Date().toLocaleTimeString(),
             agent: "QA Engineer (Runner)",
-            message: isDuplicate 
-              ? `Referenced existing open GitHub Bug Issue #${issueResult.issueNumber}` 
+            message: isDuplicate
+              ? `Referenced existing open GitHub Bug Issue #${issueResult.issueNumber}`
               : `Created GitHub Bug Issue #${issueResult.issueNumber}`,
             type: "info"
           });
@@ -2225,12 +2247,12 @@ async function traceLlmCall(
 async function getGitHubAppToken(installationId: string): Promise<string> {
   const appId = process.env.GITHUB_APP_ID;
   const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
-  
+
   if (!appId || !privateKey) {
     console.warn("[GitHubApp] GITHUB_APP_ID or GITHUB_APP_PRIVATE_KEY environment variables are missing. Using GITHUB_TOKEN fallback.");
     return process.env.GITHUB_TOKEN || "";
   }
-  
+
   try {
     // Generate signed JWT for GitHub App (expires in 10 mins)
     const now = Math.floor(Date.now() / 1000);
@@ -2239,9 +2261,9 @@ async function getGitHubAppToken(installationId: string): Promise<string> {
       exp: now + 540,
       iss: appId
     };
-    
+
     const appJwt = jwt.sign(payload, privateKey, { algorithm: "RS256" });
-    
+
     const response = await fetch(`https://api.github.com/app/installations/${installationId}/access_tokens`, {
       method: "POST",
       headers: {
@@ -2249,7 +2271,7 @@ async function getGitHubAppToken(installationId: string): Promise<string> {
         "Accept": "application/vnd.github+json"
       }
     });
-    
+
     if (response.ok) {
       const data = await response.json() as any;
       console.log(`[GitHubApp] Successfully fetched access token for installation ID: ${installationId}`);
@@ -2287,7 +2309,7 @@ async function createGithubIssue(projectId: string, title: string, body: string)
 
     // Extract owner and repo from vcsRepoUrl (e.g., https://github.com/owner/repo or owner/repo)
     let repoPath = project.vcsRepoUrl.replace("https://github.com/", "").replace(/\.git$/, "");
-    
+
     // Check if duplicate issue exists
     try {
       const listResponse = await fetch(`https://api.github.com/repos/${repoPath}/issues?state=open`, {
@@ -2434,7 +2456,7 @@ async function updateGithubIssue(
 // Git Init, Commit & Remote GitHub push executor
 async function pushToGithub(projectId: string, repoUrl: string) {
   const dirPath = path.join(__dirname, `../../../generated/${projectId}`);
-  
+
   // Load token based on Git Auth configuration
   let token = process.env.GITHUB_TOKEN || "";
   try {
@@ -2454,7 +2476,7 @@ async function pushToGithub(projectId: string, repoUrl: string) {
     await execAsync('git config user.name "Valkyrie Swarm"', { cwd: dirPath });
     await execAsync('git config user.email "swarm@valkyrie.app"', { cwd: dirPath });
     await execAsync("git add .", { cwd: dirPath });
-    
+
     try {
       await execAsync('git commit -m "Scaffold from Valkyrie multi-agent swarm"', { cwd: dirPath });
     } catch (commitErr: any) {
@@ -2469,27 +2491,27 @@ async function pushToGithub(projectId: string, repoUrl: string) {
       if (repoPath.includes("@")) {
         repoPath = repoPath.substring(repoPath.indexOf("@") + 1);
       }
-      
+
       const remoteUrl = `https://oauth2:${token}@${repoPath}`;
       try {
         await execAsync("git remote remove origin", { cwd: dirPath });
-      } catch (e) {}
+      } catch (e) { }
 
       await execAsync(`git remote add origin ${remoteUrl}`, { cwd: dirPath });
       await execAsync("git branch -M main", { cwd: dirPath });
       await execAsync("git push -u origin main --force", { cwd: dirPath });
-      
+
       let commitHash = "";
       try {
         const hashRes = await execAsync("git rev-parse HEAD", { cwd: dirPath });
         commitHash = hashRes.stdout.trim();
-      } catch (e) {}
+      } catch (e) { }
 
       const cleanRepoUrl = repoUrl.endsWith(".git") ? repoUrl.slice(0, -4) : repoUrl;
       const commitLink = commitHash ? `${cleanRepoUrl}/commit/${commitHash}` : "";
 
-      return { 
-        success: true, 
+      return {
+        success: true,
         message: `Successfully pushed repository to: ${repoUrl}`,
         commitHash,
         commitLink
@@ -2508,7 +2530,7 @@ app.get("/api/admin/stats", { preHandler: [authMiddleware, requireRole(["admin"]
     const projectCount = await prisma.project.count();
     const runsCount = await prisma.agentRun.count();
     const runs = await prisma.agentRun.findMany();
-    
+
     let totalCostUSD = 0;
     let totalTokens = 0;
 
@@ -2539,7 +2561,7 @@ app.get("/api/admin/stats", { preHandler: [authMiddleware, requireRole(["admin"]
             agentCostsMap[agent].costUSD += 0.09;
           }
         });
-      } catch (e) {}
+      } catch (e) { }
     });
 
     return reply.send({
