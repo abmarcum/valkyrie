@@ -628,12 +628,17 @@ async function callGeminiWithRetry(
     }
 
     if (cachedResponse) {
-      await addLog(
-        agentName,
-        `[Cache Hit] Serving cached response for ${agentName} from database (avoided duplicate LLM call).`,
-        "success"
-      );
-      return cachedResponse;
+      const cachedText = cachedResponse.content?.[0]?.text || "";
+      if (cachedText && cachedText.trim().length > 0) {
+        await addLog(
+          agentName,
+          `[Cache Hit] Serving cached response for ${agentName} from database (avoided duplicate LLM call).`,
+          "success"
+        );
+        return cachedResponse;
+      } else {
+        agentResponseCache.delete(cacheKey);
+      }
     }
   }
 
@@ -666,7 +671,15 @@ async function callGeminiWithRetry(
           throw new Error(`Google API returned status ${response.status}: ${errorText}`);
         }
         const data = await response.json() as any;
-        resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        const candidate = data.candidates?.[0];
+        if (candidate?.content?.parts && Array.isArray(candidate.content.parts)) {
+          resultText = candidate.content.parts
+            .filter((p: any) => !p.thought)
+            .map((p: any) => p.text || "")
+            .join("");
+        } else {
+          resultText = candidate?.content?.parts?.[0]?.text || "";
+        }
         inputTokens = data.usageMetadata?.promptTokenCount || 0;
         outputTokens = data.usageMetadata?.candidatesTokenCount || 0;
 
@@ -693,7 +706,14 @@ async function callGeminiWithRetry(
           throw new Error(`Anthropic API returned status ${response.status}: ${errorText}`);
         }
         const data = await response.json() as any;
-        resultText = data.content?.[0]?.text || "";
+        if (Array.isArray(data.content)) {
+          resultText = data.content
+            .filter((block: any) => block.type === "text" || (block.text && !block.thinking))
+            .map((block: any) => block.text || "")
+            .join("");
+        } else {
+          resultText = data.content?.[0]?.text || "";
+        }
         inputTokens = data.usage?.input_tokens || 0;
         outputTokens = data.usage?.output_tokens || 0;
 
@@ -750,6 +770,10 @@ async function callGeminiWithRetry(
         resultText = data.message?.content || "";
         inputTokens = data.prompt_eval_count || 0;
         outputTokens = data.eval_count || 0;
+      }
+
+      if (!resultText || resultText.trim() === "") {
+        throw new Error(`LLM provider '${provider}' returned empty response content for model '${activeModel}'.`);
       }
 
       const mapped = {
@@ -1251,23 +1275,52 @@ Return JSON ONLY in the format:
           }
         }
 
+        // Universal Default Scaffolding: Ensure targetFileList is NEVER empty
+        if (targetFileList.length === 0) {
+          console.warn("[ValkyrieSwarm] All manifest parsing fallbacks yielded 0 files. Injecting default modular scaffold...");
+          const defaultsByLang: Record<string, Array<{ path: string; description: string }>> = {
+            go: [
+              { path: "go.mod", description: "Go module definition" },
+              { path: "main.go", description: "Main entry point" },
+              { path: "main_test.go", description: "Unit test suite" },
+              { path: "pkg/api/handler.go", description: "API request handlers" },
+              { path: "pkg/types/types.go", description: "Shared data models" }
+            ],
+            typescript: [
+              { path: "package.json", description: "Package manifest" },
+              { path: "src/index.ts", description: "Main application entry" },
+              { path: "src/__tests__/index.test.ts", description: "Unit test suite" },
+              { path: "src/types/index.ts", description: "Type definitions" }
+            ],
+            python: [
+              { path: "requirements.txt", description: "Python dependencies" },
+              { path: "main.py", description: "Application entry point" },
+              { path: "tests/test_main.py", description: "Unit test suite" },
+              { path: "app/models.py", description: "Data models" }
+            ]
+          };
+          targetFileList = defaultsByLang[language.toLowerCase()] || defaultsByLang.go;
+          await addLog("Developer Agent", `Injected ${targetFileList.length} standard scaffold modules to guarantee multi-file generation.`, "info");
+        }
+
         let codeText = "";
 
         if (targetFileList.length > 0) {
           await addLog("Developer Agent", `Architectural manifest generated (${targetFileList.length} target modules). Synthesizing code modularly...`, "info");
           for (const fileObj of targetFileList) {
             if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-            const filePrompt = `Generate the exact code contents for file '${fileObj.path}' (${fileObj.description}).
-Language: ${language}
-Description: ${description}
-PRD: ${cleanPrd}
-Architecture: ${cleanArch}
-DB Schema: ${cleanData}
-UI Spec: ${cleanUi}
+            const filePrompt = `You are a Principal Software Engineer implementing '${fileObj.path}' (${fileObj.description}) for this ${language} project.
+Project Description: ${description}
+PRD Summary: ${cleanPrd.substring(0, 4000)}
+System Architecture: ${cleanArch.substring(0, 2000)}
+DB Schema: ${cleanData.substring(0, 2000)}
+UI Spec: ${cleanUi.substring(0, 2000)}
 
-Output clean code structured with path header:
+CRITICAL REQUIREMENT:
+You must output the COMPLETE, working, production-ready source code for file '${fileObj.path}' without truncation or placeholders.
+Do NOT leave the response empty. Output clean code structured with path header:
 ## ${fileObj.path}
-[code content]`;
+[full code content]`;
 
             const fileRes = await callGeminiWithRetry(
               apiKey,
@@ -1288,8 +1341,16 @@ Output clean code structured with path header:
             const fOutput = fileRes.usage?.output_tokens;
             await updateCost(fInput, fOutput);
 
+            let cleanModuleCode = fileCode.trim();
+            if (cleanModuleCode.startsWith("```")) {
+              cleanModuleCode = cleanModuleCode.replace(/^```[a-zA-Z0-9_-]*\n?/, "").replace(/\n?```$/, "").trim();
+            }
+            const moduleFilePath = path.join(projectDirPath, fileObj.path);
+            fs.mkdirSync(path.dirname(moduleFilePath), { recursive: true });
+            fs.writeFileSync(moduleFilePath, cleanModuleCode + "\n");
+            console.log(`[ValkyrieParser] Wrote ${cleanModuleCode.length} bytes directly to module: ${fileObj.path}`);
+            codeText += `\n\n## ${fileObj.path}\n${cleanModuleCode}`;
             writeProjectFiles(projectId, language, fileCode, false);
-            codeText += `\n\n${fileCode}`;
           }
         } else {
           // Single pass fallback if manifest JSON is unavailable
@@ -1802,8 +1863,8 @@ function writeProjectFiles(projectId: string, language: string, content: string,
     const standaloneBacktick = line.match(/^\s*`([^`\s]+)`\s*$/);
     if (standaloneBacktick && isValidFilePath(standaloneBacktick[1])) {
       matchedCandidate = standaloneBacktick[1];
-    } else if (/^#+/.test(line) || /^File:|^Path:/i.test(line)) {
-      const tokens = line.replace(/^#+/, "").replace(/^(?:File:?|Path:?)\s*/i, "").trim().split(/\s+/);
+    } else if (/^#+/.test(line) || /^File:|^Path:/i.test(line) || /^\s*(?:\/\/|\/\*|--|#)/.test(line)) {
+      const tokens = line.replace(/^\s*(?:#+|\/\/+|\/\*+|--+)\s*/, "").replace(/^(?:File:?|Path:?)\s*/i, "").trim().split(/\s+/);
       for (const token of tokens) {
         const cleaned = token.replace(/^[`'"([<]+|[`'")\]>,:]+$/g, "");
         if (isValidFilePath(cleaned)) {
@@ -2848,6 +2909,12 @@ async function pushToGithub(projectId: string, repoUrl: string) {
     await execFileAsync("git", ["init"], { cwd: dirPath });
     await execFileAsync("git", ["config", "user.name", "Valkyrie Swarm"], { cwd: dirPath });
     await execFileAsync("git", ["config", "user.email", "swarm@valkyrie.app"], { cwd: dirPath });
+    try {
+      const existingFiles = fs.readdirSync(dirPath).filter(f => !f.startsWith("."));
+      if (existingFiles.length === 0) {
+        fs.writeFileSync(path.join(dirPath, "README.md"), `# ${projectId}\n\nRepository initialized by Valkyrie Multi-Agent Swarm.\n`);
+      }
+    } catch (e) {}
     await execFileAsync("git", ["add", "."], { cwd: dirPath });
 
     try {
@@ -2968,3 +3035,4 @@ const start = async () => {
 if (process.env.NODE_ENV !== "test") {
   start();
 }
+
