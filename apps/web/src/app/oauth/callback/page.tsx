@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { ORCHESTRATOR_URL } from "@/lib/config";
 
 function OAuthCallbackHandler() {
   const router = useRouter();
@@ -18,7 +19,7 @@ function OAuthCallbackHandler() {
 
     const exchangeCode = async () => {
       try {
-        const response = await fetch("http://localhost:4000/oauth/token", {
+        const response = await fetch(`${ORCHESTRATOR_URL}/oauth/token`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json"

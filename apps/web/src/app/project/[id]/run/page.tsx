@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { ORCHESTRATOR_URL } from "@/lib/config";
 
 interface LogMessage {
   timestamp: string;
@@ -68,7 +69,7 @@ export default function RunPipeline() {
     
     const token = localStorage.getItem("token");
     try {
-      const response = await fetch(`http://localhost:4000/api/projects/${id}/restart`, {
+      const response = await fetch(`${ORCHESTRATOR_URL}/api/projects/${id}/restart`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -96,7 +97,7 @@ export default function RunPipeline() {
     
     const token = localStorage.getItem("token");
     try {
-      const response = await fetch(`http://localhost:4000/api/projects/${id}/cancel`, {
+      const response = await fetch(`${ORCHESTRATOR_URL}/api/projects/${id}/cancel`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${token}`
@@ -155,7 +156,7 @@ export default function RunPipeline() {
     if (!token) return;
 
     // Connect to SSE stream passing OAuth token in query params
-    const eventSource = new EventSource(`http://localhost:4000/api/projects/${id}/stream?token=${token}`);
+    const eventSource = new EventSource(`${ORCHESTRATOR_URL}/api/projects/${id}/stream?token=${token}`);
 
     eventSource.onmessage = (event) => {
       try {

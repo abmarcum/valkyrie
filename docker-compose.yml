@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  orchestrator:
+    image: nas.fooguru.org:30095/valkyrie-orchestrator:latest
+    container_name: valkyrie-orchestrator
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    volumes:
+      - valkyrie-generated-data:/app/generated
+
+volumes:
+  valkyrie-generated-data:

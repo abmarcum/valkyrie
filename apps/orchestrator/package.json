@@ -9,19 +9,17 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
+    "@fastify/cors": "^10.0.2",
     "@google/genai": "^2.11.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@valkyrie/db": "*",
     "cohere-ai": "^8.0.0",
-    "cors": "^2.8.5",
     "dotenv": "^17.4.2",
-    "express": "^4.19.2",
+    "fastify": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "langsmith": "^0.8.1"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.17",
-    "@types/express": "^4.17.21",
     "@types/node": "^20.12.7",
     "tsx": "^4.7.2",
     "typescript": "^5.4.5"

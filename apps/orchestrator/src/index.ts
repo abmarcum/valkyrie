@@ -1,5 +1,6 @@
-import express, { Request, Response, NextFunction } from "express";
-import cors from "cors";
+import Fastify, { FastifyRequest, FastifyReply } from "fastify";
+import fastifyCors from "@fastify/cors";
+import { ServerResponse } from "http";
 import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
@@ -35,11 +36,10 @@ function loadEnv() {
 }
 loadEnv();
 
-const app = express();
+const app = Fastify({ logger: false });
 const PORT = Number(process.env.PORT) || 4000;
 
-app.use(cors());
-app.use(express.json());
+app.register(fastifyCors, { origin: true });
 
 // Seeding standard tenant on startup
 async function seedDatabase() {
@@ -139,43 +139,46 @@ function calculateLlmCost(promptTokens: number, completionTokens: number): { inp
 }
 
 // Authentication and role authorization middlewares
-function authMiddleware(req: Request, res: Response, next: NextFunction) {
+async function authMiddleware(req: FastifyRequest, reply: FastifyReply) {
   const authHeader = req.headers.authorization;
+  const queryToken = (req.query as any)?.token;
   let token = "";
   if (authHeader && authHeader.startsWith("Bearer ")) {
     token = authHeader.substring(7);
-  } else if (req.query.token) {
-    token = req.query.token as string;
+  } else if (queryToken) {
+    token = queryToken as string;
   }
 
   if (!token) {
-    return res.status(401).json({ error: "Unauthorized: Missing authentication token" });
+    reply.status(401).send({ error: "Unauthorized: Missing authentication token" });
+    return;
   }
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
     (req as any).user = decoded;
-    next();
   } catch (err: any) {
-    return res.status(401).json({ error: "Unauthorized: Invalid or expired token" });
+    reply.status(401).send({ error: "Unauthorized: Invalid or expired token" });
+    return;
   }
 }
 
 function requireRole(roles: string[]) {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return async (req: FastifyRequest, reply: FastifyReply) => {
     const user = (req as any).user;
     if (!user) {
-      return res.status(401).json({ error: "Unauthorized: Session missing" });
+      reply.status(401).send({ error: "Unauthorized: Session missing" });
+      return;
     }
     if (!roles.includes(user.role)) {
-      return res.status(403).json({ error: `Forbidden: Role ${user.role} does not have permission` });
+      reply.status(403).send({ error: `Forbidden: Role ${user.role} does not have permission` });
+      return;
     }
-    next();
   };
 }
 
 // In-memory active SSE streams mapping
-const sseClients = new Map<string, Response[]>();
+const sseClients = new Map<string, ServerResponse[]>();
 
 function notifyClients(projectId: string, payload: any) {
   const clients = sseClients.get(projectId) || [];
@@ -185,13 +188,13 @@ function notifyClients(projectId: string, payload: any) {
 }
 
 // Public OAuth 2.0 Auth Endpoint
-app.get("/oauth/authorize", (req: Request, res: Response) => {
-  const { client_id, redirect_uri, response_type, username, state } = req.query;
+app.get("/oauth/authorize", async (req: FastifyRequest, reply: FastifyReply) => {
+  const { client_id, redirect_uri, response_type, username, state } = req.query as any || {};
   if (!username) {
-    return res.status(400).json({ error: "Username query parameter is required for mock OAuth authorization" });
+    return reply.status(400).send({ error: "Username query parameter is required for mock OAuth authorization" });
   }
   if (!redirect_uri) {
-    return res.status(400).json({ error: "redirect_uri is required" });
+    return reply.status(400).send({ error: "redirect_uri is required" });
   }
 
   const code = `auth_code_${Math.random().toString(36).substring(2, 9)}`;
@@ -204,19 +207,19 @@ app.get("/oauth/authorize", (req: Request, res: Response) => {
   }
 
   console.log(`[OAuth] Authorized username '${username}' returning code '${code}'`);
-  res.redirect(targetUrl.toString());
+  return reply.redirect(targetUrl.toString());
 });
 
 // Public OAuth 2.0 Token Exchange Endpoint
-app.post("/oauth/token", async (req: Request, res: Response) => {
-  const { code, grant_type } = req.body;
+app.post("/oauth/token", async (req: FastifyRequest, reply: FastifyReply) => {
+  const { code, grant_type } = req.body as any || {};
   if (!code) {
-    return res.status(400).json({ error: "Authorization code is required" });
+    return reply.status(400).send({ error: "Authorization code is required" });
   }
 
   const session = authCodes.get(code);
   if (!session) {
-    return res.status(400).json({ error: "Invalid or expired authorization code" });
+    return reply.status(400).send({ error: "Invalid or expired authorization code" });
   }
   authCodes.delete(code);
 
@@ -260,32 +263,32 @@ app.post("/oauth/token", async (req: Request, res: Response) => {
     );
 
     console.log(`[OAuth] Issued access token for '${username}' (role: ${role})`);
-    res.json({
+    return reply.send({
       access_token: token,
       token_type: "Bearer",
       expires_in: 86400
     });
   } catch (err: any) {
     console.error("Token exchange database error:", err.message);
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
 // Profile Endpoint (requires token verification)
-app.get("/api/auth/me", authMiddleware, (req: Request, res: Response) => {
-  res.json({ user: (req as any).user });
+app.get("/api/auth/me", { preHandler: [authMiddleware] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  return reply.send({ user: (req as any).user });
 });
 
 // Admin Panel settings endpoints
-app.get("/api/admin/settings", authMiddleware, requireRole(["admin"]), (req: Request, res: Response) => {
+app.get("/api/admin/settings", { preHandler: [authMiddleware, requireRole(["admin"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
   const settings = loadSettings();
-  res.json(settings);
+  return reply.send(settings);
 });
 
-app.post("/api/admin/settings", authMiddleware, requireRole(["admin"]), (req: Request, res: Response) => {
-  const { selectedModel, selectedProvider, googleApiKey, anthropicApiKey, openaiApiKey, ollamaIp } = req.body;
+app.post("/api/admin/settings", { preHandler: [authMiddleware, requireRole(["admin"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  const { selectedModel, selectedProvider, googleApiKey, anthropicApiKey, openaiApiKey, ollamaIp } = req.body as any || {};
   if (!selectedModel || !selectedProvider) {
-    return res.status(400).json({ error: "selectedModel and selectedProvider are required" });
+    return reply.status(400).send({ error: "selectedModel and selectedProvider are required" });
   }
   
   const settings = loadSettings();
@@ -298,15 +301,15 @@ app.post("/api/admin/settings", authMiddleware, requireRole(["admin"]), (req: Re
   saveSettings(settings);
 
   console.log(`[AdminSettings] Updated selected settings: model=${selectedModel}, provider=${selectedProvider}`);
-  res.json({ success: true, message: `System AI settings updated successfully.` });
+  return reply.send({ success: true, message: `System AI settings updated successfully.` });
 });
 
 // Proxy LLM requests for local/containerized runners to use the active model & provider settings
-app.post("/api/projects/:id/llm", async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const { systemPrompt, userPrompt, agentName } = req.body;
+app.post("/api/projects/:id/llm", async (req: FastifyRequest, reply: FastifyReply) => {
+  const { id } = req.params as any;
+  const { systemPrompt, userPrompt, agentName } = req.body as any || {};
   if (!systemPrompt || !userPrompt) {
-    return res.status(400).json({ error: "systemPrompt and userPrompt are required." });
+    return reply.status(400).send({ error: "systemPrompt and userPrompt are required." });
   }
 
   try {
@@ -329,22 +332,22 @@ app.post("/api/projects/:id/llm", async (req: Request, res: Response) => {
     const inputTokens = response.usage?.input_tokens || 0;
     const outputTokens = response.usage?.output_tokens || 0;
 
-    res.json({
+    return reply.send({
       text: resultText,
       inputTokens,
       outputTokens
     });
   } catch (err: any) {
     console.error("[LLM Proxy Error]:", err.message);
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
 // REST: Admin - Create Company (Tenant)
-app.post("/api/admin/companies", authMiddleware, requireRole(["admin"]), async (req: Request, res: Response) => {
-  const { id, name } = req.body;
+app.post("/api/admin/companies", { preHandler: [authMiddleware, requireRole(["admin"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  const { id, name } = req.body as any || {};
   if (!name) {
-    return res.status(400).json({ error: "Company name is required." });
+    return reply.status(400).send({ error: "Company name is required." });
   }
   try {
     const tenantId = id || name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -352,50 +355,49 @@ app.post("/api/admin/companies", authMiddleware, requireRole(["admin"]), async (
       data: { id: tenantId, name }
     });
     console.log(`[AdminCompany] Created company: ${name} (${tenant.id})`);
-    res.status(201).json(tenant);
+    return reply.status(201).send(tenant);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
 // REST: Admin - Get All Companies (Tenants)
-app.get("/api/admin/companies", authMiddleware, requireRole(["admin"]), async (req: Request, res: Response) => {
+app.get("/api/admin/companies", { preHandler: [authMiddleware, requireRole(["admin"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const tenants = await prisma.tenant.findMany({
       orderBy: { createdAt: "desc" }
     });
-    res.json(tenants);
+    return reply.send(tenants);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
 // REST: Admin - Get projects by Company ID
-app.get("/api/admin/companies/:id/projects", authMiddleware, requireRole(["admin"]), async (req: Request, res: Response) => {
-  const companyId = req.params.id;
+app.get("/api/admin/companies/:id/projects", { preHandler: [authMiddleware, requireRole(["admin"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  const companyId = (req.params as any).id;
   try {
     const projects = await prisma.project.findMany({
       where: { tenantId: companyId },
       include: { agentRuns: true },
       orderBy: { createdAt: "desc" }
     });
-    res.json(projects);
+    return reply.send(projects);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
-
 // REST: Admin - Create User
-app.post("/api/admin/users", authMiddleware, requireRole(["admin"]), async (req: Request, res: Response) => {
-  const { email, name, role, tenantId } = req.body;
+app.post("/api/admin/users", { preHandler: [authMiddleware, requireRole(["admin"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  const { email, name, role, tenantId } = req.body as any || {};
   if (!email || !role || !tenantId) {
-    return res.status(400).json({ error: "email, role, and tenantId are required." });
+    return reply.status(400).send({ error: "email, role, and tenantId are required." });
   }
   try {
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
     if (!tenant) {
-      return res.status(404).json({ error: `Company with ID '${tenantId}' not found.` });
+      return reply.status(404).send({ error: `Company with ID '${tenantId}' not found.` });
     }
     
     const user = await prisma.user.create({
@@ -408,28 +410,28 @@ app.post("/api/admin/users", authMiddleware, requireRole(["admin"]), async (req:
       }
     });
     console.log(`[AdminUser] Created user: ${email} with role: ${role} under company: ${tenantId}`);
-    res.status(201).json(user);
+    return reply.status(201).send(user);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
 // REST: Admin - Get All Users
-app.get("/api/admin/users", authMiddleware, requireRole(["admin"]), async (req: Request, res: Response) => {
+app.get("/api/admin/users", { preHandler: [authMiddleware, requireRole(["admin"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const users = await prisma.user.findMany({
       include: { tenant: true },
       orderBy: { createdAt: "desc" }
     });
-    res.json(users);
+    return reply.send(users);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
 // REST: Initialize and trigger agent swarm
-app.post("/api/projects/run", authMiddleware, requireRole(["admin", "user"]), async (req: Request, res: Response) => {
-  const { projectId, projectName, language, cloud, description, vcsRepo, vcsAuthType, githubInstallationId, tenantId } = req.body;
+app.post("/api/projects/run", { preHandler: [authMiddleware, requireRole(["admin", "user"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  const { projectId, projectName, language, cloud, description, vcsRepo, vcsAuthType, githubInstallationId, tenantId } = req.body as any || {};
   const userSession = (req as any).user;
 
   try {
@@ -471,10 +473,10 @@ app.post("/api/projects/run", authMiddleware, requireRole(["admin", "user"]), as
     // 3. Trigger execution asynchronously
     runAgentPipeline(projectId, projectName, language, cloud, description, vcsRepo);
 
-    res.status(201).json({ status: "STARTED", projectId: project.id });
+    return reply.status(201).send({ status: "STARTED", projectId: project.id });
   } catch (err: any) {
     console.error("Error creating project run:", err);
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
@@ -1507,18 +1509,18 @@ function writeProjectFiles(projectId: string, language: string, content: string,
 }
 
 // SSE Streaming Endpoint
-app.get("/api/projects/:id/stream", authMiddleware, async (req: Request, res: Response) => {
-  const projectId = req.params.id;
+app.get("/api/projects/:id/stream", { preHandler: [authMiddleware] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  const projectId = (req.params as any).id;
 
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
+  reply.raw.setHeader("Content-Type", "text/event-stream");
+  reply.raw.setHeader("Cache-Control", "no-cache");
+  reply.raw.setHeader("Connection", "keep-alive");
 
   // Add client connection
   if (!sseClients.has(projectId)) {
     sseClients.set(projectId, []);
   }
-  sseClients.get(projectId)!.push(res);
+  sseClients.get(projectId)!.push(reply.raw);
 
   // Send initial data state
   try {
@@ -1527,7 +1529,7 @@ app.get("/api/projects/:id/stream", authMiddleware, async (req: Request, res: Re
       include: { project: true }
     });
     if (run) {
-      res.write(`data: ${JSON.stringify({
+      reply.raw.write(`data: ${JSON.stringify({
         projectId,
         projectName: run.project.name,
         language: run.project.programmingLanguage,
@@ -1538,14 +1540,14 @@ app.get("/api/projects/:id/stream", authMiddleware, async (req: Request, res: Re
     }
   } catch (e) {}
 
-  req.on("close", () => {
+  req.raw.on("close", () => {
     const clients = sseClients.get(projectId) || [];
-    sseClients.set(projectId, clients.filter(c => c !== res));
+    sseClients.set(projectId, clients.filter(c => c !== reply.raw));
   });
 });
 
 // REST: Get all projects
-app.get("/api/projects", authMiddleware, async (req: Request, res: Response) => {
+app.get("/api/projects", { preHandler: [authMiddleware] }, async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const projects = await prisma.project.findMany({
       include: {
@@ -1555,15 +1557,15 @@ app.get("/api/projects", authMiddleware, async (req: Request, res: Response) => 
         createdAt: "desc"
       }
     });
-    res.json(projects);
+    return reply.send(projects);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
 // REST: Delete a project and its workspace
-app.delete("/api/projects/:id", authMiddleware, requireRole(["admin", "user"]), async (req: Request, res: Response) => {
-  const projectId = req.params.id;
+app.delete("/api/projects/:id", { preHandler: [authMiddleware, requireRole(["admin", "user"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  const projectId = (req.params as any).id;
   try {
     await prisma.project.delete({
       where: { id: projectId }
@@ -1579,24 +1581,23 @@ app.delete("/api/projects/:id", authMiddleware, requireRole(["admin", "user"]), 
       fs.rmSync(sandboxPath, { recursive: true, force: true });
     }
 
-    res.json({ success: true, message: "Project deleted successfully." });
+    return reply.send({ success: true, message: "Project deleted successfully." });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
 // REST: Restart active agent pipeline swarm
-app.post("/api/projects/:id/restart", authMiddleware, requireRole(["admin", "user"]), async (req: Request, res: Response) => {
-  const projectId = req.params.id;
-  const useCache = req.body.useCache !== false;
+app.post("/api/projects/:id/restart", { preHandler: [authMiddleware, requireRole(["admin", "user"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  const projectId = (req.params as any).id;
+  const useCache = (req.body as any)?.useCache !== false;
   try {
     const project = await prisma.project.findUnique({
       where: { id: projectId }
     });
 
     if (!project) {
-      res.status(404).json({ error: "Project not found." });
-      return;
+      return reply.status(404).send({ error: "Project not found." });
     }
 
     await prisma.agentRun.update({
@@ -1625,15 +1626,15 @@ app.post("/api/projects/:id/restart", authMiddleware, requireRole(["admin", "use
       useCache
     );
 
-    res.json({ success: true, message: "Pipeline restarted successfully." });
+    return reply.send({ success: true, message: "Pipeline restarted successfully." });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
 // REST: Cancel active agent pipeline swarm
-app.post("/api/projects/:id/cancel", authMiddleware, requireRole(["admin", "user"]), async (req: Request, res: Response) => {
-  const projectId = req.params.id;
+app.post("/api/projects/:id/cancel", { preHandler: [authMiddleware, requireRole(["admin", "user"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  const projectId = (req.params as any).id;
   try {
     cancelledRuns.add(projectId);
     
@@ -1642,9 +1643,9 @@ app.post("/api/projects/:id/cancel", authMiddleware, requireRole(["admin", "user
       data: { status: "CANCELLED" }
     });
 
-    res.json({ success: true, message: "Pipeline cancellation signal sent." });
+    return reply.send({ success: true, message: "Pipeline cancellation signal sent." });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
@@ -1672,38 +1673,36 @@ function getFilesRecursively(dir: string, baseDir: string = dir): Array<{ name: 
 }
 
 // REST: Get files for local QA runner CLI
-app.get("/api/projects/:id/files", (req: Request, res: Response) => {
-  const projectId = req.params.id;
+app.get("/api/projects/:id/files", async (req: FastifyRequest, reply: FastifyReply) => {
+  const projectId = (req.params as any).id;
   const dirPath = path.join(__dirname, `../../../generated/${projectId}`);
 
   if (!fs.existsSync(dirPath)) {
-    res.status(404).json({ error: "No generated files found for this project." });
-    return;
+    return reply.status(404).send({ error: "No generated files found for this project." });
   }
 
   try {
     const filesContent = getFilesRecursively(dirPath);
-    res.json({ files: filesContent });
+    return reply.send({ files: filesContent });
   } catch (err: any) {
     console.error("[GetFiles] Error listing project files:", err);
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
 // REST: Get project run status
-app.get("/api/projects/:id/status", async (req: Request, res: Response) => {
-  const projectId = req.params.id;
+app.get("/api/projects/:id/status", async (req: FastifyRequest, reply: FastifyReply) => {
+  const projectId = (req.params as any).id;
   try {
     const run = await prisma.agentRun.findUnique({
       where: { id: projectId }
     });
     if (!run) {
-      res.status(404).json({ error: "Agent run not found." });
-      return;
+      return reply.status(404).send({ error: "Agent run not found." });
     }
-    res.json({ status: run.status });
+    return reply.send({ status: run.status });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
@@ -1805,7 +1804,11 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
             }
             const updateResult = await updateGithubIssue(projectId, issueNumber, commentBody, "closed");
             if (updateResult.success) {
-              await addFixLog("Developer Agent", `GitHub Bug Issue #${issueNumber} updated and closed.`, "success");
+              if (updateResult.message.includes("already")) {
+                await addFixLog("Developer Agent", `GitHub Bug Issue #${issueNumber} was already closed. Skipping updates.`, "info");
+              } else {
+                await addFixLog("Developer Agent", `GitHub Bug Issue #${issueNumber} updated and closed.`, "success");
+              }
             } else {
               await addFixLog("Developer Agent", `Failed to update GitHub Bug Issue #${issueNumber}: ${updateResult.message}`, "warning");
             }
@@ -1830,9 +1833,9 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
 }
 
 // REST: Submit QA report
-app.post("/api/projects/:id/qa-report", async (req: Request, res: Response) => {
-  const projectId = req.params.id;
-  const { passed, logs, errors } = req.body;
+app.post("/api/projects/:id/qa-report", async (req: FastifyRequest, reply: FastifyReply) => {
+  const projectId = (req.params as any).id;
+  const { passed, logs, errors } = req.body as any || {};
 
   try {
     const run = await prisma.agentRun.findUnique({
@@ -1841,8 +1844,7 @@ app.post("/api/projects/:id/qa-report", async (req: Request, res: Response) => {
     });
 
     if (!run) {
-      res.status(404).json({ error: "Agent run not found." });
-      return;
+      return reply.status(404).send({ error: "Agent run not found." });
     }
 
     const currentLogs = JSON.parse(run.logs as string);
@@ -1856,7 +1858,7 @@ app.post("/api/projects/:id/qa-report", async (req: Request, res: Response) => {
       }
     ];
 
-    res.json({ status: "PROCESSED" }); // Instantly return report parsed confirmation
+    reply.send({ status: "PROCESSED" }); // Instantly return report parsed confirmation
 
     if (!passed) {
       // Submit a bug report to GitHub when QA Runner reports a failure
@@ -1880,7 +1882,7 @@ ${errors && errors.length > 0 ? errors.join("\n") : "(No errors reported)"}
 ${logs && logs.length > 0 ? logs.join("\n") : "(No stdout output)"}
 \`\`\``;
         
-        const issueResult = await createGithubIssue(projectId, issueTitle, issueBody);
+        const issueResult = await createGithubIssue(run.project.vcsRepoUrl || "", issueTitle, issueBody);
         if (issueResult.success && issueResult.issueNumber) {
           const isDuplicate = issueResult.message.includes("Duplicate");
           updatedLogs.push({
@@ -1960,10 +1962,9 @@ ${logs && logs.length > 0 ? logs.join("\n") : "(No stdout output)"}
     });
 
   } catch (err: any) {
-    if (!res.headersSent) {
-      res.status(500).json({ error: err.message });
-    } else {
-      console.error("[ValkyrieQA] Error handling QA report after response sent:", err.message);
+    console.error("[ValkyrieQA] Error handling QA report:", err.message);
+    if (!reply.sent) {
+      return reply.status(500).send({ error: err.message });
     }
   }
 });
@@ -2181,6 +2182,27 @@ async function updateGithubIssue(
 
     let repoPath = project.vcsRepoUrl.replace("https://github.com/", "").replace(/\.git$/, "");
 
+    // Fetch the issue details to verify if it is currently open
+    try {
+      const getResponse = await fetch(`https://api.github.com/repos/${repoPath}/issues/${issueNumber}`, {
+        method: "GET",
+        headers: {
+          "Accept": "application/vnd.github+json",
+          "Authorization": `Bearer ${token}`,
+          "X-GitHub-Api-Version": "2022-11-28"
+        }
+      });
+      if (getResponse.ok) {
+        const issueData = await getResponse.json() as any;
+        if (issueData.state !== "open") {
+          console.log(`[GitHubIssue] Issue #${issueNumber} is already ${issueData.state}. Skipping updates.`);
+          return { success: true, message: `Issue #${issueNumber} is already ${issueData.state}.` };
+        }
+      }
+    } catch (e: any) {
+      console.error(`[GitHubIssue] Failed to check status of issue #${issueNumber}:`, e.message);
+    }
+
     // 1. Add comment to issue
     const commentResponse = await fetch(`https://api.github.com/repos/${repoPath}/issues/${issueNumber}/comments`, {
       method: "POST",
@@ -2292,7 +2314,7 @@ async function pushToGithub(projectId: string, repoUrl: string) {
 }
 
 // REST: Real-time aggregated project stats for admin panel
-app.get("/api/admin/stats", authMiddleware, requireRole(["admin"]), async (req: Request, res: Response) => {
+app.get("/api/admin/stats", { preHandler: [authMiddleware, requireRole(["admin"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
   try {
     const projectCount = await prisma.project.count();
     const runsCount = await prisma.agentRun.count();
@@ -2331,7 +2353,7 @@ app.get("/api/admin/stats", authMiddleware, requireRole(["admin"]), async (req: 
       } catch (e) {}
     });
 
-    res.json({
+    return reply.send({
       projectCount,
       runsCount,
       totalCostUSD: totalCostUSD > 0 ? totalCostUSD : 15.32,
@@ -2343,10 +2365,17 @@ app.get("/api/admin/stats", authMiddleware, requireRole(["admin"]), async (req: 
       }))
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return reply.status(500).send({ error: err.message });
   }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Valkyrie Orchestrator running on http://0.0.0.0:${PORT}`);
-});
+const start = async () => {
+  try {
+    await app.listen({ port: PORT, host: "0.0.0.0" });
+    console.log(`Valkyrie Orchestrator running on http://0.0.0.0:${PORT}`);
+  } catch (err) {
+    console.error(err);
+    process.exit(1);
+  }
+};
+start();

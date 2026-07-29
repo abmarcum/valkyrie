@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { ORCHESTRATOR_URL } from "@/lib/config";
 
 interface AgentCost {
   role: string;
@@ -121,7 +122,7 @@ export default function AdminDashboard() {
 
   const fetchSettings = async (token: string) => {
     try {
-      const response = await fetch("http://localhost:4000/api/admin/settings", {
+      const response = await fetch(`${ORCHESTRATOR_URL}/api/admin/settings`, {
         headers: {
           "Authorization": `Bearer ${token}`
         }
@@ -142,7 +143,7 @@ export default function AdminDashboard() {
 
   const fetchAdminLists = async (token: string) => {
     try {
-      const resCompanies = await fetch("http://localhost:4000/api/admin/companies", {
+      const resCompanies = await fetch(`${ORCHESTRATOR_URL}/api/admin/companies`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
       if (resCompanies.ok) {
@@ -153,7 +154,7 @@ export default function AdminDashboard() {
         }
       }
 
-      const resUsers = await fetch("http://localhost:4000/api/admin/users", {
+      const resUsers = await fetch(`${ORCHESTRATOR_URL}/api/admin/users`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
       if (resUsers.ok) {
@@ -172,7 +173,7 @@ export default function AdminDashboard() {
 
     setSettingsLoading(true);
     try {
-      const response = await fetch("http://localhost:4000/api/admin/settings", {
+      const response = await fetch(`${ORCHESTRATOR_URL}/api/admin/settings`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -209,7 +210,7 @@ export default function AdminDashboard() {
 
     setCreatingCompany(true);
     try {
-      const response = await fetch("http://localhost:4000/api/admin/companies", {
+      const response = await fetch(`${ORCHESTRATOR_URL}/api/admin/companies`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -244,7 +245,7 @@ export default function AdminDashboard() {
 
     setCreatingUser(true);
     try {
-      const response = await fetch("http://localhost:4000/api/admin/users", {
+      const response = await fetch(`${ORCHESTRATOR_URL}/api/admin/users`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -280,7 +281,7 @@ export default function AdminDashboard() {
 
     setLoadingProjects(true);
     try {
-      const response = await fetch(`http://localhost:4000/api/admin/companies/${company.id}/projects`, {
+      const response = await fetch(`${ORCHESTRATOR_URL}/api/admin/companies/${company.id}/projects`, {
         headers: { "Authorization": `Bearer ${token}` }
       });
       if (response.ok) {
@@ -301,7 +302,7 @@ export default function AdminDashboard() {
 
   const fetchStats = async (token: string) => {
     try {
-      const response = await fetch("http://localhost:4000/api/admin/stats", {
+      const response = await fetch(`${ORCHESTRATOR_URL}/api/admin/stats`, {
         headers: {
           "Authorization": `Bearer ${token}`
         }

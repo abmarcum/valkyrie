@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { ORCHESTRATOR_URL } from "@/lib/config";
 
 export default function Login() {
   const [username, setUsername] = useState("");
@@ -24,11 +25,12 @@ export default function Login() {
     }
     setError("");
     
-    // Redirect to local Mock OAuth Authorize endpoint
+    // Redirect to Mock OAuth Authorize endpoint using current domain origin
     const client_id = "valkyrie-web";
-    const redirect_uri = encodeURIComponent("http://localhost:3000/oauth/callback");
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const redirect_uri = encodeURIComponent(`${origin}/oauth/callback`);
     const response_type = "code";
-    const authUrl = `http://localhost:4000/oauth/authorize?client_id=${client_id}&redirect_uri=${redirect_uri}&response_type=${response_type}&username=${encodeURIComponent(username.trim())}&state=valk_state`;
+    const authUrl = `${ORCHESTRATOR_URL}/oauth/authorize?client_id=${client_id}&redirect_uri=${redirect_uri}&response_type=${response_type}&username=${encodeURIComponent(username.trim())}&state=valk_state`;
     
     window.location.href = authUrl;
   };

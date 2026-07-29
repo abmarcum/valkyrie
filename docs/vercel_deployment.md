@@ -4,7 +4,7 @@ This document provides step-by-step instructions to deploy the Valkyrie multi-ag
 
 ## 🏛️ Production Architecture Overview
 
-Valkyrie is structured as a monorepo consisting of a Next.js frontend, an Express backend, and a shared database client. Because the orchestrator runs **long-running agent workflows** (which exceed Serverless function execution timeouts) and **saves generated codebases to local sandbox directories**, a split-deployment model is required:
+Valkyrie is structured as a monorepo consisting of a Next.js frontend, a Fastify backend, and a shared database client. Because the orchestrator runs **long-running agent workflows** (which exceed Serverless function execution timeouts) and **saves generated codebases to local sandbox directories**, a split-deployment model is required:
 
 ```
                   ┌──────────────────────┐
@@ -16,7 +16,7 @@ Valkyrie is structured as a monorepo consisting of a Next.js frontend, an Expres
                              ▼
  ┌───────────────────────────────────────────────────────┐
  │                   Cloud VM Hosting                    │
- │    (Express Orchestrator Backend & QA sandbox)        │
+ │    (Fastify Orchestrator Backend & QA sandbox)        │
  │              Render / Railway / AWS                   │
  └──────────────────────────┬────────────────────────────┘
                             │
@@ -29,7 +29,7 @@ Valkyrie is structured as a monorepo consisting of a Next.js frontend, an Expres
 ```
 
 1. **Frontend (Vercel)**: Hosts the Next.js dashboard (`apps/web`).
-2. **Backend (Render / Railway / AWS)**: Hosts the Express API (`apps/orchestrator`) on a persistent server instance to support file system sandboxes and unlimited execution timeouts.
+2. **Backend (Render / Railway / AWS)**: Hosts the Fastify API (`apps/orchestrator`) on a persistent server instance to support file system sandboxes and unlimited execution timeouts.
 3. **Database (Neon / Supabase)**: Serverless PostgreSQL database to replace the local SQLite file.
 
 ---
@@ -57,32 +57,80 @@ SQLite is stateless and read-only on serverless/container platforms. We need to 
 
 ---
 
-## 🌐 Step 2: Deploy Backend to Render or Railway
+## 🌐 Step 2: Deploy Backend to Render, Railway, AWS ECR, or Docker Hub
 
-To support continuous stream log connections (SSE) and persistent code generation files, deploy `apps/orchestrator` to Render or Railway.
+To support continuous stream log connections (SSE) and persistent code generation files, deploy `apps/orchestrator` as a containerized service.
 
-### Dockerfile Deployment (Recommended)
-You can deploy the backend using the root `package.json` configurations or compile a standalone Docker container. Create a `Dockerfile.backend` in the root:
+### 🐳 1. Dockerfile Configuration ([Dockerfile.backend](file:///Users/andrew/ai-workspace/code/valkyrie/Dockerfile.backend))
+A production-optimized Dockerfile targeted for **Linux AMD64 (x86_64)** is included in the monorepo root:
 
 ```dockerfile
-FROM node:20-bookworm-slim
+FROM node:24-bookworm-slim
+
 WORKDIR /app
+
+# Copy monorepo configuration and lockfiles
 COPY package.json package-lock.json tsconfig.json ./
 COPY apps/orchestrator ./apps/orchestrator
 COPY packages/db ./packages/db
+
+# Install dependencies
 RUN npm ci
+
+# Generate Prisma client and compile TypeScript orchestrator backend
 RUN npx prisma generate --schema=packages/db/prisma/schema.prisma
 RUN npm run build --workspace=@valkyrie/orchestrator
+
 EXPOSE 4000
-CMD ["npm", "run", "dev", "--workspace=@valkyrie/orchestrator"]
+
+# Start production Fastify orchestrator backend
+CMD ["node", "apps/orchestrator/dist/index.js"]
 ```
 
-### Environment Variables
-Configure these variables in your hosting panel:
+### 🔨 2. Build the Docker Image for Linux AMD64
+Build the container image targeting `linux/amd64` architecture (crucial when building on Apple Silicon / macOS):
+```bash
+docker build --platform linux/amd64 -t valkyrie-orchestrator:latest -f Dockerfile.backend .
+```
+
+### 📤 3. Push Image to a Container Registry
+
+#### Option A: Docker Hub
+```bash
+# Log in to Docker Hub
+docker login
+
+# Tag and push image
+docker tag valkyrie-orchestrator:latest <your-dockerhub-username>/valkyrie-orchestrator:latest
+docker push <your-dockerhub-username>/valkyrie-orchestrator:latest
+```
+
+#### Option B: GitHub Container Registry (GHCR)
+```bash
+# Log in to GHCR (using a Personal Access Token with write:packages permission)
+echo $GHCR_PAT | docker login ghcr.io -u <your-github-username> --password-stdin
+
+# Tag and push image
+docker tag valkyrie-orchestrator:latest ghcr.io/<your-github-username>/valkyrie-orchestrator:latest
+docker push ghcr.io/<your-github-username>/valkyrie-orchestrator:latest
+```
+
+#### Option C: AWS Elastic Container Registry (ECR)
+```bash
+# Authenticate Docker to AWS ECR
+aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <aws_account_id>.dkr.ecr.<region>.amazonaws.com
+
+# Tag and push image
+docker tag valkyrie-orchestrator:latest <aws_account_id>.dkr.ecr.<region>.amazonaws.com/valkyrie-orchestrator:latest
+docker push <aws_account_id>.dkr.ecr.<region>.amazonaws.com/valkyrie-orchestrator:latest
+```
+
+### ⚙️ 4. Environment Variables
+Configure these variables in your cloud hosting provider:
 * `PORT`: `4000`
 * `DATABASE_URL`: Your PostgreSQL connection string.
-* `GITHUB_TOKEN`: GitHub personal access token (or GitHub App parameters) for bug tracking integration.
-* API Keys (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OLLAMA_IP` if hosting a remote Ollama server).
+* `GITHUB_TOKEN`: Personal Access Token or GitHub App credentials.
+* API Keys (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OLLAMA_IP`).
 
 ---
 
@@ -96,9 +144,9 @@ Configure these variables in your hosting panel:
    * **Build Command**: `cd ../.. && npm run build --filter=web`
    * **Output Directory**: `Default (.next)`
    * **Install Command**: `cd ../.. && npm install`
-4. Add the following **Environment Variables**:
-   * `NEXT_PUBLIC_ORCHESTRATOR_URL`: The HTTPS URL of your hosted backend (e.g. `https://valkyrie-orchestrator.onrender.com`).
-   * `DATABASE_URL`: The same PostgreSQL connection string (since the Next.js app queries Prisma database runs directly).
+4. Add the following **Environment Variable**:
+   * `NEXT_PUBLIC_ORCHESTRATOR_URL`: The HTTPS URL of your hosted Fastify backend (e.g. `https://valkyrie-orchestrator.onrender.com`).
+   * *Note: The Next.js frontend routes 100% of data traffic through the Fastify API and does NOT require direct database connections or `DATABASE_URL` credentials.*
 5. Click **Deploy**.
 
 ---

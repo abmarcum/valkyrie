@@ -4,6 +4,14 @@ This is the Next.js frontend application for Valkyrie. It provides developer int
 
 ---
 
+## 🔌 API-First Decoupled Architecture
+
+* **Zero Direct Database Coupling**: The frontend does **not** connect directly to SQLite or PostgreSQL and carries zero database credentials.
+* **100% API-Routed Data Flow**: All data operations (projects, telemetry streaming, companies, users, settings, and stats) route exclusively through the Fastify Orchestrator API backend.
+* **Centralized Configuration**: Configured via `src/lib/config.ts` using `process.env.NEXT_PUBLIC_ORCHESTRATOR_URL` (defaulting to `http://localhost:4000`).
+
+---
+
 ## 🎨 Dashboard Interfaces
 
 ### 🏠 Swarm Projects Directory (`/dashboard`)

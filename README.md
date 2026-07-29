@@ -10,7 +10,7 @@ Valkyrie is structured as a TypeScript monorepo containing the following compone
 
 ```
 ├── apps/
-│   ├── orchestrator/       # Express server managing the LLM swarm pipelines, Git pushes & LLM proxying
+│   ├── orchestrator/       # Fastify server managing the LLM swarm pipelines, Git pushes & LLM proxying
 │   ├── qa-runner/          # Local QA executor CLI, Docker wrapper, & Model Context Protocol (MCP) server
 │   └── web/                # Next.js telemetry dashboard, project milestones, & admin panel
 ├── packages/

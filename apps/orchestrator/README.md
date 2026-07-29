@@ -6,16 +6,17 @@ The Orchestrator manages the execution flow of the AI swarm. It parses developer
 
 ## 🛠️ Key Architectural Features
 
-1. **Sequential Swarm Workflow**: Spawns individual agent prompts for PM, Software Architect, Data Architect, UI/UX Designer, Codebase Developer, Security Architect, Tech Writer, and QA Engineer.
-2. **Double Validation Auditing**: 
+1. **High-Performance Fastify Engine**: Powered by **Fastify 5**, providing high-throughput REST route handling, low overhead, and asynchronous Server-Sent Events (SSE) log streaming.
+2. **Sequential Swarm Workflow**: Spawns individual agent prompts for PM, Software Architect, Data Architect, UI/UX Designer, Codebase Developer, Security Architect, Tech Writer, and QA Engineer.
+3. **Double Validation Auditing**: 
    * The **Software Architect** validates developer files against the architectural design (capped at a maximum of 3 validation iterations).
    * The **Security Architect** audits the developer code for injection vectors, secret leaks, and OWASP Top 10 vulnerabilities.
-3. **Immediate Remote pushes**: Codebase changes are committed and pushed to the project's GitHub repository immediately after the Security Architect finishes auditing the code, before technical manuals are built.
-4. **Self-Healing Loop & Issue Tracker**: Receives test reports from the QA Runner. If tests fail, the orchestrator automatically **submits a descriptive GitHub bug issue** containing full stdout/stderr system log segments, triggers the Developer Agent to analyze the bugs and apply fixes, commits and pushes the fixes to GitHub, and **comments on the issue with a direct link to the new commit** before closing it.
-5. **Multi-API Provider Engine**: Supports Google (Gemini), Anthropic (Claude), OpenAI (GPT), and Ollama (local server). System settings default to local Ollama inference running model `qwen3-coder:latest` on port `11434`.
-6. **LLM Proxying Service**: Decouples sandboxed runners from API key variables by hosting a centralized completion proxy.
-7. **Caching Engine**: Built-in in-memory KV prompt response caching. Can be toggled on/off in project telemetry headers.
-8. **Model Resilience**: Automatically issues warning indicators and falls back to `gemini-1.5-flash` if a Google API query yields a 404 error.
+4. **Immediate Remote pushes**: Codebase changes are committed and pushed to the project's GitHub repository immediately after the Security Architect finishes auditing the code, before technical manuals are built.
+5. **Self-Healing Loop & Issue Tracker**: Receives test reports from the QA Runner. If tests fail, the orchestrator automatically **submits a descriptive GitHub bug issue** containing full stdout/stderr system log segments, triggers the Developer Agent to analyze the bugs and apply fixes, commits and pushes the fixes to GitHub, and **comments on the issue with a direct link to the new commit** before closing it.
+6. **Multi-API Provider Engine**: Supports Google (Gemini), Anthropic (Claude), OpenAI (GPT), and Ollama (local server). System settings default to local Ollama inference running model `qwen3-coder:latest` on port `11434`.
+7. **LLM Proxying Service**: Decouples sandboxed runners from API key variables by hosting a centralized completion proxy.
+8. **Caching Engine**: Built-in in-memory KV prompt response caching. Can be toggled on/off in project telemetry headers.
+9. **Model Resilience**: Automatically issues warning indicators and falls back to `gemini-1.5-flash` if a Google API query yields a 404 error.
 
 ---
 
@@ -41,11 +42,35 @@ The Orchestrator manages the execution flow of the AI swarm. It parses developer
 
 ---
 
-## 🚀 Execution Instructions
+## 🚀 Execution & Containerization Instructions
 
-Run the server independently from the orchestrator folder (requires SQLite setup):
+### Local Development
+Run the server independently from the orchestrator folder:
 ```bash
 # Start backend server
 npm run dev
 ```
 By default, the backend listens on port `4000`.
+
+---
+
+### 🐳 Docker Container Build & Push (Linux AMD64)
+
+1. **Build Container Image for `linux/amd64`:**
+   ```bash
+   # Run from workspace root
+   docker build --platform linux/amd64 -t valkyrie-orchestrator:latest -f Dockerfile.backend .
+   ```
+
+2. **Push to Registry:**
+   * **Docker Hub**:
+     ```bash
+     docker tag valkyrie-orchestrator:latest <your-username>/valkyrie-orchestrator:latest
+     docker push <your-username>/valkyrie-orchestrator:latest
+     ```
+   * **GitHub Container Registry (GHCR)**:
+     ```bash
+     docker tag valkyrie-orchestrator:latest ghcr.io/<your-username>/valkyrie-orchestrator:latest
+     docker push ghcr.io/<your-username>/valkyrie-orchestrator:latest
+     ```
+

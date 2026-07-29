@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { ORCHESTRATOR_URL } from "@/lib/config";
 
 interface Project {
   id: string;
@@ -59,7 +60,7 @@ export default function Dashboard() {
 
   const fetchProjects = async (token: string) => {
     try {
-      const response = await fetch("http://localhost:4000/api/projects", {
+      const response = await fetch(`${ORCHESTRATOR_URL}/api/projects`, {
         headers: {
           "Authorization": `Bearer ${token}`
         }
@@ -86,7 +87,7 @@ export default function Dashboard() {
 
   const fetchCompanies = async (token: string) => {
     try {
-      const response = await fetch("http://localhost:4000/api/admin/companies", {
+      const response = await fetch(`${ORCHESTRATOR_URL}/api/admin/companies`, {
         headers: {
           "Authorization": `Bearer ${token}`
         }
@@ -135,7 +136,7 @@ export default function Dashboard() {
 
     const token = localStorage.getItem("token");
     try {
-      const response = await fetch(`http://localhost:4000/api/projects/${projectId}`, {
+      const response = await fetch(`${ORCHESTRATOR_URL}/api/projects/${projectId}`, {
         method: "DELETE",
         headers: {
           "Authorization": `Bearer ${token}`
@@ -163,7 +164,7 @@ export default function Dashboard() {
     const token = localStorage.getItem("token");
 
     try {
-      const response = await fetch("http://localhost:4000/api/projects/run", {
+      const response = await fetch(`${ORCHESTRATOR_URL}/api/projects/run`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
