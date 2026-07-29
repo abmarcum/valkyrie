@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { ORCHESTRATOR_URL } from "@/lib/config";
 
@@ -25,6 +25,16 @@ interface Company {
   name: string;
 }
 
+interface AttachedFile {
+  id: string;
+  name: string;
+  type: "TXT" | "PDF";
+  size: number;
+  text: string;
+  loading: boolean;
+  error?: string;
+}
+
 export default function Dashboard() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -34,6 +44,9 @@ export default function Dashboard() {
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [language, setLanguage] = useState("typescript");
   const [cloud, setCloud] = useState("aws");
   const [dbPlatform, setDbPlatform] = useState("postgresql");
@@ -153,6 +166,64 @@ export default function Dashboard() {
     }
   };
 
+  const handleFileUpload = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    
+    for (const file of fileArray) {
+      const fileId = `file-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const isPdf = file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf";
+      const isTxt = file.name.toLowerCase().endsWith(".txt") || file.type === "text/plain";
+
+      if (!isPdf && !isTxt) {
+        alert(`Unsupported file format for '${file.name}'. Please upload .txt or .pdf specification files.`);
+        continue;
+      }
+
+      const newFile: AttachedFile = {
+        id: fileId,
+        name: file.name,
+        type: isPdf ? "PDF" : "TXT",
+        size: file.size,
+        text: "",
+        loading: true
+      };
+
+      setAttachedFiles(prev => [...prev, newFile]);
+
+      try {
+        if (isTxt) {
+          const text = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve((e.target?.result as string) || "");
+            reader.onerror = (e) => reject(e);
+            reader.readAsText(file);
+          });
+          setAttachedFiles(prev => prev.map(f => f.id === fileId ? { ...f, text, loading: false } : f));
+        } else if (isPdf) {
+          const formData = new FormData();
+          formData.append("file", file);
+          const res = await fetch("/api/parse-pdf", {
+            method: "POST",
+            body: formData
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setAttachedFiles(prev => prev.map(f => f.id === fileId ? { ...f, text: data.text, loading: false } : f));
+          } else {
+            const errData = await res.json();
+            setAttachedFiles(prev => prev.map(f => f.id === fileId ? { ...f, loading: false, error: errData.error || "Failed to parse PDF" } : f));
+          }
+        }
+      } catch (err: any) {
+        setAttachedFiles(prev => prev.map(f => f.id === fileId ? { ...f, loading: false, error: err.message || "Failed to read file" } : f));
+      }
+    }
+  };
+
+  const removeAttachedFile = (id: string) => {
+    setAttachedFiles(prev => prev.filter(f => f.id !== id));
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (user?.role === "viewer") {
@@ -162,6 +233,17 @@ export default function Dashboard() {
     if (!name) return;
     const projectId = `proj-${Date.now()}`;
     const token = localStorage.getItem("token");
+
+    // Append text extracted from uploaded specification documents
+    let combinedDescription = description.trim();
+    const loadedFilesText = attachedFiles
+      .filter(f => !f.loading && f.text && !f.error)
+      .map(f => `\n\n--- ATTACHED SPECIFICATION DOCUMENT: ${f.name} (${f.type}) ---\n${f.text}`)
+      .join("");
+
+    if (loadedFilesText) {
+      combinedDescription = (combinedDescription ? combinedDescription : "Project built according to attached specification documents.") + loadedFilesText;
+    }
 
     try {
       const response = await fetch(`${ORCHESTRATOR_URL}/api/projects/run`, {
@@ -175,7 +257,7 @@ export default function Dashboard() {
           projectName: name,
           language,
           cloud: cloud.toUpperCase(),
-          description,
+          description: combinedDescription,
           vcsRepo,
           vcsAuthType,
           githubInstallationId: vcsAuthType === "github_app" ? githubInstallationId : undefined,
@@ -279,7 +361,26 @@ export default function Dashboard() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Detailed Requirements</label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Detailed Requirements</label>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-xs font-semibold text-violet-400 hover:text-violet-300 flex items-center space-x-1.5 transition-colors disabled:opacity-50"
+                  disabled={isViewer}
+                >
+                  <span>📎 Attach .txt / .pdf Documents</span>
+                </button>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={(e) => e.target.files && handleFileUpload(e.target.files)}
+                  multiple
+                  accept=".txt,.pdf,text/plain,application/pdf"
+                  className="hidden"
+                />
+              </div>
+
               <textarea
                 placeholder="Specify endpoints, authentication, database structure, failover behavior, caching, and specific business flows..."
                 rows={4}
@@ -288,6 +389,68 @@ export default function Dashboard() {
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors disabled:opacity-50"
                 disabled={isViewer}
               />
+
+              {/* Drag & Drop File Upload Zone */}
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (!isViewer && e.dataTransfer.files) {
+                    handleFileUpload(e.dataTransfer.files);
+                  }
+                }}
+                onClick={() => !isViewer && fileInputRef.current?.click()}
+                className="mt-2 border border-dashed border-slate-800 hover:border-slate-700 bg-slate-950/40 rounded-lg p-3 text-center transition-colors cursor-pointer group"
+              >
+                <p className="text-xs text-slate-500 group-hover:text-slate-400 transition-colors">
+                  Drag & drop requirement files here or click to browse (<span className="text-slate-400 font-mono">.txt, .pdf</span>)
+                </p>
+              </div>
+
+              {/* Attached Files Badge List */}
+              {attachedFiles.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {attachedFiles.map(file => (
+                    <div key={file.id} className="flex items-center justify-between bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-2 text-xs">
+                      <div className="flex items-center space-x-2 overflow-hidden">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase border ${
+                          file.type === "PDF" 
+                            ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                            : "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
+                        }`}>
+                          {file.type}
+                        </span>
+                        <span className="font-medium text-slate-200 truncate max-w-[200px] sm:max-w-[300px]" title={file.name}>
+                          {file.name}
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          ({(file.size / 1024).toFixed(1)} KB)
+                        </span>
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        {file.loading ? (
+                          <span className="text-[10px] text-amber-400 animate-pulse font-semibold">Parsing...</span>
+                        ) : file.error ? (
+                          <span className="text-[10px] text-rose-400 font-semibold" title={file.error}>Error</span>
+                        ) : (
+                          <span className="text-[10px] text-emerald-400 font-semibold font-mono">
+                            ✓ {file.text.length.toLocaleString()} chars
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeAttachedFile(file.id)}
+                          className="text-slate-500 hover:text-rose-400 font-bold px-1 transition-colors"
+                          title="Remove file"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
