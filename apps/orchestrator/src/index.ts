@@ -79,8 +79,8 @@ interface SystemSettings {
 function loadSettings(): SystemSettings {
   const defaultOllamaHost = process.env.OLLAMA_IP || process.env.OLLAMA_HOST || "http://localhost:11434";
   let settings: SystemSettings = {
-    selectedModel: "qwen3-coder:latest",
-    selectedProvider: "ollama",
+    selectedModel: "claude-sonnet-5",
+    selectedProvider: "anthropic",
     googleApiKey: process.env.GEMINI_API_KEY || "",
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
     openaiApiKey: process.env.OPENAI_API_KEY || "",
@@ -92,8 +92,8 @@ function loadSettings(): SystemSettings {
       const data = fs.readFileSync(SETTINGS_FILE, "utf-8");
       const parsed = JSON.parse(data);
       settings = {
-        selectedModel: parsed.selectedModel || "qwen3-coder:latest",
-        selectedProvider: parsed.selectedProvider || "ollama",
+        selectedModel: parsed.selectedModel || "claude-sonnet-5",
+        selectedProvider: parsed.selectedProvider || "anthropic",
         googleApiKey: process.env.GEMINI_API_KEY || parsed.googleApiKey || "",
         anthropicApiKey: process.env.ANTHROPIC_API_KEY || parsed.anthropicApiKey || "",
         openaiApiKey: process.env.OPENAI_API_KEY || parsed.openaiApiKey || "",

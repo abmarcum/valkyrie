@@ -50,8 +50,8 @@ export default function AdminDashboard() {
   const [user, setUser] = useState<UserSession | null>(null);
   const [apiKey, setApiKey] = useState("valk_live_8f3d...9c2d");
   const [gitStatus] = useState("Connected (GitHub App)");
-  const [selectedModel, setSelectedModel] = useState("qwen3-coder:latest");
-  const [selectedProvider, setSelectedProvider] = useState("ollama");
+  const [selectedModel, setSelectedModel] = useState("claude-sonnet-5");
+  const [selectedProvider, setSelectedProvider] = useState("anthropic");
   const [googleApiKey, setGoogleApiKey] = useState("");
   const [anthropicApiKey, setAnthropicApiKey] = useState("");
   const [openaiApiKey, setOpenaiApiKey] = useState("");
@@ -450,10 +450,10 @@ export default function AdminDashboard() {
                   }}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors"
                 >
-                  <option value="ollama">Ollama (Local Swarm Inference)</option>
-                  <option value="google">Google Gemini API</option>
                   <option value="anthropic">Anthropic Claude API</option>
+                  <option value="google">Google Gemini API</option>
                   <option value="openai">OpenAI GPT API</option>
+                  <option value="ollama">Ollama (Local Swarm Inference)</option>
                 </select>
               </div>
 
