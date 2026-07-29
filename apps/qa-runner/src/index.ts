@@ -620,7 +620,8 @@ async function startGlobalQaDaemon() {
         console.warn(`[QA Daemon] Polling /api/projects/pending-qa failed (HTTP ${response.status}): ${errBody || response.statusText}`);
       }
     } catch (err: any) {
-      console.warn(`[QA Daemon] Polling connection error: ${err.message}`);
+      const causeMsg = err.cause?.message ? ` (${err.cause.message})` : "";
+      console.warn(`[QA Daemon] Polling connection error: ${err.message}${causeMsg}`);
     }
     await new Promise(resolve => setTimeout(resolve, 4000));
   }

@@ -71,7 +71,6 @@ async function seedDatabase() {
     console.error("DB Seed warning (might be prisma client loading):", err.message);
   }
 }
-seedDatabase();
 
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString("hex");
 
