@@ -30,6 +30,12 @@ describe("extractJsonBlock", () => {
     expect(extracted).toBe('{\n  "files": ["main.go"]\n}');
     expect(JSON.parse(extracted)).toEqual({ files: ["main.go"] });
   });
+
+  it("should strip single line comments and trailing commas", () => {
+    const raw = "```json\n{\n  // Manifest list\n  \"files\": [\"main.go\",],\n}\n```";
+    const extracted = extractJsonBlock(raw);
+    expect(JSON.parse(extracted)).toEqual({ files: ["main.go"] });
+  });
 });
 
 describe("stripCritiqueHeaders", () => {

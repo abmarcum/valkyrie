@@ -1237,7 +1237,7 @@ Return JSON ONLY in the format:
           const archLines = cleanArch.split(/\r?\n/);
           const found = new Set<string>();
           for (const line of archLines) {
-            const tokens = line.replace(/^[#\-\*\s]+/, "").split(/[\s,;:()]+/);
+            const tokens = line.replace(/^[#\-\*\s├─└│+|]+/g, "").split(/[\s,;:()]+/);
             for (const token of tokens) {
               const cleaned = token.replace(/^[`'"([<]+|[`'")\]>,:]+$/g, "");
               if (isValidFilePath(cleaned) && !found.has(cleaned)) {
@@ -1333,7 +1333,7 @@ Output clean code structured with path header:
         completedStatuses.add("AUDITING");
 
         // Write project code files
-        writeProjectFiles(projectId, language, codeText || "// Generated code");
+        writeProjectFiles(projectId, language, codeText || "// Generated code", false);
         await addLog("Developer Agent", "Code synthesized. Files saved to disk.", "success");
         completedStatuses.add("GENERATING");
 
@@ -1670,7 +1670,7 @@ ${currentResponseText}
 The ${reviewerName} reviewed your work and provided these critique suggestions:
 ${reviewerReviewText}
 
-Please update and rewrite your specifications to apply all of these suggestions. Output the complete revised results.`;
+Please update and rewrite your specifications to apply all of these suggestions. Output the complete revised results. You MUST structure every code module with its exact file header (e.g. ## path/to/file.ext) above the code block.`;
 
     const revisionResult = await callGeminiWithRetry(
       apiKey,
@@ -1703,19 +1703,25 @@ Please update and rewrite your specifications to apply all of these suggestions.
 // Helper to extract JSON object or array substring from LLM response text
 export function extractJsonBlock(str: string): string {
   if (!str) return "";
-  const cleaned = str.replace(/```json/gi, "").replace(/```/g, "").trim();
+  let cleaned = str.replace(/```json/gi, "").replace(/```/g, "").trim();
 
   const firstBrace = cleaned.indexOf("{");
   const lastBrace = cleaned.lastIndexOf("}");
   if (firstBrace !== -1 && lastBrace > firstBrace) {
-    return cleaned.substring(firstBrace, lastBrace + 1);
+    cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+  } else {
+    const firstBracket = cleaned.indexOf("[");
+    const lastBracket = cleaned.lastIndexOf("]");
+    if (firstBracket !== -1 && lastBracket > firstBracket) {
+      cleaned = cleaned.substring(firstBracket, lastBracket + 1);
+    }
   }
 
-  const firstBracket = cleaned.indexOf("[");
-  const lastBracket = cleaned.lastIndexOf("]");
-  if (firstBracket !== -1 && lastBracket > firstBracket) {
-    return cleaned.substring(firstBracket, lastBracket + 1);
-  }
+  // Strip JS single-line comments (// comment) and trailing commas before braces/brackets
+  cleaned = cleaned
+    .replace(/\/\/.*/g, "")
+    .replace(/,\s*([}\]])/g, "$1")
+    .trim();
 
   return cleaned;
 }
@@ -2324,7 +2330,7 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
       include: { project: true }
     });
     const language = run?.project?.programmingLanguage || "typescript";
-    writeProjectFiles(projectId, language, codeText || "// Fixed code");
+    writeProjectFiles(projectId, language, codeText || "// Fixed code", false);
 
     // Commit and push the code changes to GitHub immediately after Developer Agent fixes code
     if (run && run.project.vcsRepoUrl) {

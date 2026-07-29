@@ -3,7 +3,7 @@ import React from "react";
 export default function Home() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between font-sans">
-      
+
       {/* Header */}
       <header className="max-w-7xl w-full mx-auto px-6 h-20 flex items-center justify-between">
         <a href="/" className="flex items-center space-x-3 hover:opacity-90 transition-opacity">
@@ -14,8 +14,8 @@ export default function Home() {
             VALKYRIE
           </span>
         </a>
-        <a 
-          href="/login" 
+        <a
+          href="/login"
           className="px-4 py-2 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 hover:text-slate-200 text-sm font-semibold transition-all"
         >
           Dashboard Login
@@ -24,7 +24,7 @@ export default function Home() {
 
       {/* Hero Section */}
       <main className="flex-1 max-w-5xl mx-auto px-6 flex flex-col items-center justify-center text-center space-y-8">
-        
+
         {/* Badge */}
         <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-xs text-violet-400 font-semibold uppercase tracking-wider">
           <span>⚡ Next-Gen Enterprise App Scaffolder</span>
