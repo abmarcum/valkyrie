@@ -1423,6 +1423,7 @@ Structure each document with path headers (e.g. ## README.md or ## docs/api.md) 
         status: "QA_LOOP"
       }
     });
+    notifyClients(projectId, { projectId, status: "QA_LOOP" });
   } catch (err: any) {
     if (err.message === "SWARM_CANCELLED") {
       await addLog("System", "Swarm pipeline execution cancelled by user.", "warning");

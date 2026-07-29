@@ -615,9 +615,12 @@ async function startGlobalQaDaemon() {
             activeProcessing.delete(proj.id);
           }
         }
+      } else {
+        const errBody = await response.text().catch(() => "");
+        console.warn(`[QA Daemon] Polling /api/projects/pending-qa failed (HTTP ${response.status}): ${errBody || response.statusText}`);
       }
     } catch (err: any) {
-      // Quiet retry when orchestrator is starting up
+      console.warn(`[QA Daemon] Polling connection error: ${err.message}`);
     }
     await new Promise(resolve => setTimeout(resolve, 4000));
   }
