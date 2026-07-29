@@ -42,6 +42,7 @@ export const orchestratorUrl = process.env.ORCHESTRATOR_URL || "http://localhost
 export function sendReport(projId: string, passed: boolean, logs: string[], errors: string[]) {
   const payload = JSON.stringify({ passed, logs, errors });
   const url = new URL(`${orchestratorUrl}/api/projects/${projId}/qa-report`);
+  const internalSecret = process.env.ORCHESTRATOR_INTERNAL_SECRET || "valkyrie_internal_daemon_secret";
   
   const req = http.request({
     hostname: url.hostname,
@@ -50,7 +51,8 @@ export function sendReport(projId: string, passed: boolean, logs: string[], erro
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Content-Length": Buffer.byteLength(payload)
+      "Content-Length": Buffer.byteLength(payload),
+      "x-valkyrie-qa-key": internalSecret
     }
   }, (res) => {
     let data = "";
@@ -72,9 +74,17 @@ export function sendReport(projId: string, passed: boolean, logs: string[], erro
 // Download files from orchestrator REST endpoint
 export function downloadWorkspaceFiles(projId: string = projectId): Promise<Array<{ name: string; content: string }>> {
   return new Promise((resolve, reject) => {
-    const url = `${orchestratorUrl}/api/projects/${projId}/files`;
+    const url = new URL(`${orchestratorUrl}/api/projects/${projId}/files`);
+    const internalSecret = process.env.ORCHESTRATOR_INTERNAL_SECRET || "valkyrie_internal_daemon_secret";
     
-    http.get(url, (res) => {
+    http.get({
+      hostname: url.hostname,
+      port: url.port,
+      path: url.pathname,
+      headers: {
+        "x-valkyrie-qa-key": internalSecret
+      }
+    }, (res) => {
       if (res.statusCode !== 200) {
         reject(new Error(`Failed to fetch project files. Status: ${res.statusCode}`));
         return;
@@ -503,10 +513,20 @@ async function executeQA(targetProjectId?: string) {
       }
     });
 
+    const safeEnv = { ...process.env };
+    delete safeEnv.GEMINI_API_KEY;
+    delete safeEnv.GOOGLE_API_KEY;
+    delete safeEnv.ANTHROPIC_API_KEY;
+    delete safeEnv.OPENAI_API_KEY;
+    delete safeEnv.GITHUB_TOKEN;
+    delete safeEnv.DATABASE_URL;
+
     child = exec(command, {
       cwd: sandboxDir,
+      timeout: 15000,
+      maxBuffer: 10 * 1024 * 1024,
       env: {
-        ...process.env,
+        ...safeEnv,
         PYTHONPATH: sandboxDir
       }
     }, async (error, stdout, stderr) => {
@@ -569,10 +589,16 @@ async function startGlobalQaDaemon() {
 
   const activeProcessing = new Set<string>();
 
+  const internalSecret = process.env.ORCHESTRATOR_INTERNAL_SECRET || "valkyrie_internal_daemon_secret";
+
   while (true) {
     try {
       const url = `${orchestratorUrl}/api/projects/pending-qa`;
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: {
+          "x-valkyrie-qa-key": internalSecret
+        }
+      });
       if (response.ok) {
         const pendingProjects = await response.json() as any[];
 

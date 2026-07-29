@@ -17,7 +17,9 @@ RUN npm ci
 RUN npx prisma generate --schema=packages/db/prisma/schema.prisma
 RUN npm run build --workspace=@valkyrie/orchestrator
 
-EXPOSE 4000
+# Fix ownership and switch to non-root node user
+RUN chown -R node:node /app
+USER node
 
 # Start production Fastify orchestrator backend with automated schema push
 CMD ["sh", "-c", "npx prisma db push --schema=packages/db/prisma/schema.prisma && node apps/orchestrator/dist/index.js"]

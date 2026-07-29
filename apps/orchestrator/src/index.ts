@@ -3,8 +3,9 @@ import fastifyCors from "@fastify/cors";
 import { ServerResponse } from "http";
 import fs from "fs";
 import path from "path";
-import { exec } from "child_process";
+import { exec, execFile } from "child_process";
 import { promisify } from "util";
+import crypto from "crypto";
 import { RunTree } from "langsmith";
 import dotenv from "dotenv";
 import Anthropic from "@anthropic-ai/sdk";
@@ -13,6 +14,7 @@ import { prisma } from "@valkyrie/db";
 import jwt from "jsonwebtoken";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // Load local environment variables from workspace root by climbing directory ancestry
 function loadEnv() {
@@ -39,7 +41,19 @@ loadEnv();
 const app = Fastify({ logger: false });
 const PORT = Number(process.env.PORT) || 4000;
 
-app.register(fastifyCors, { origin: true });
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",").map(s => s.trim())
+  : true;
+
+app.register(fastifyCors, { origin: allowedOrigins });
+
+// HTTP Security headers hook
+app.addHook("onSend", async (request, reply) => {
+  reply.header("X-Content-Type-Options", "nosniff");
+  reply.header("X-Frame-Options", "DENY");
+  reply.header("X-XSS-Protection", "1; mode=block");
+  reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
+});
 
 // Seeding standard tenant on startup
 async function seedDatabase() {
@@ -59,7 +73,7 @@ async function seedDatabase() {
 }
 seedDatabase();
 
-const JWT_SECRET = process.env.JWT_SECRET || "valkyrie_secret_key_98765";
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString("hex");
 
 // Mock OAuth database in-memory code mapping
 const authCodes = new Map<string, { username: string }>();
@@ -283,13 +297,6 @@ app.post("/oauth/token", async (req: FastifyRequest, reply: FastifyReply) => {
   authCodes.delete(code);
 
   const username = session.username;
-  let role = "user";
-  const nameLower = username.toLowerCase();
-  if (nameLower.includes("admin") || nameLower === "admin") {
-    role = "admin";
-  } else if (nameLower.includes("viewer") || nameLower === "viewer") {
-    role = "viewer";
-  }
 
   try {
     let user = await prisma.user.findUnique({
@@ -302,26 +309,20 @@ app.post("/oauth/token", async (req: FastifyRequest, reply: FastifyReply) => {
           id: username,
           email: `${username}@valkyrie.app`,
           name: username.charAt(0).toUpperCase() + username.slice(1),
-          role: role,
+          role: "developer",
           tenantId: "acme-corp"
         }
       });
-      console.log(`[OAuth] Created new user '${username}' in DB with role '${role}'`);
-    } else if (user.role !== role) {
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: { role }
-      });
-      console.log(`[OAuth] Updated user '${username}' role to '${role}' in DB`);
+      console.log(`[OAuth] Created new user '${username}' in DB with default role 'developer'`);
     }
 
     const token = jwt.sign(
-      { id: user.id, username, role, tenantId: "acme-corp" },
+      { id: user.id, username, role: user.role, tenantId: user.tenantId || "acme-corp" },
       JWT_SECRET,
       { expiresIn: "24h" }
     );
 
-    console.log(`[OAuth] Issued access token for '${username}' (role: ${role})`);
+    console.log(`[OAuth] Issued access token for '${username}' (role: ${user.role})`);
     return reply.send({
       access_token: token,
       token_type: "Bearer",
@@ -365,6 +366,23 @@ app.post("/api/admin/settings", { preHandler: [authMiddleware, requireRole(["adm
 
 // Proxy LLM requests for local/containerized runners to use the active model & provider settings
 app.post("/api/projects/:id/llm", async (req: FastifyRequest, reply: FastifyReply) => {
+  const authHeader = req.headers.authorization;
+  const internalSecret = process.env.ORCHESTRATOR_INTERNAL_SECRET || "valkyrie_internal_daemon_secret";
+  const internalKey = req.headers["x-valkyrie-qa-key"];
+
+  if (internalKey !== internalSecret) {
+    let authorized = false;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      try {
+        jwt.verify(authHeader.substring(7), JWT_SECRET);
+        authorized = true;
+      } catch (e) { }
+    }
+    if (!authorized) {
+      return reply.status(401).send({ error: "Unauthorized: Missing authentication credentials for LLM proxy" });
+    }
+  }
+
   const { id } = req.params as any;
   const { systemPrompt, userPrompt, agentName } = req.body as any || {};
   if (!systemPrompt || !userPrompt) {
@@ -544,6 +562,15 @@ const cancelledRuns = new Set<string>();
 
 // Global in-memory Key-Value store for agent prompt caching
 const agentResponseCache = new Map<string, any>();
+
+// Global in-memory tracking for QA fix attempts per project to prevent oscillation
+const qaFixAttemptHistory = new Map<string, Array<{ attempt: number; errors: string[]; logs: string[] }>>();
+
+// Helper function to strip audit metadata headers from context prompt variables
+function stripCritiqueHeaders(text: string): string {
+  if (!text) return "";
+  return text.split("\n--- Cohere AI Quality Audit ---")[0].trim();
+}
 
 // Helper function to query Cohere to audit/critique specifications
 async function callCohereToCritique(
@@ -1016,202 +1043,239 @@ async function runAgentPipeline(
         writeDocFile(projectId, "architecture.md", archText);
         completedStatuses.add("ARCHITECTING");
 
-        // Live Data Architect call
+        // Phase 1: Parallelize Non-Dependent Planning Agents (Fan-Out / Fan-In)
         currentStatus = "DATA_DB";
-        let dataText = "";
+        await addLog("Data Architect", "Outlining database schemas and storage models concurrently with UI/UX layout design...", "info");
+        await addLog("UI/UX Designer", "Drafting system page layouts and UI styling tokens concurrently with database schema design...", "info");
 
-        if (dbPlatform && dbPlatform.toLowerCase() === "none") {
-          await addLog("Data Architect", "Database Platform set to None (Stateless / In-Memory). Skipping Data Architect schema generation.", "info");
-          dataText = "[NO_DATABASE_REQUIRED] Database Platform set to None. No database schemas required for this project.";
-          completedStatuses.add("DATA_DB");
+        const cleanPrd = stripCritiqueHeaders(prd);
+        const cleanArch = stripCritiqueHeaders(archText);
+
+        const [dataText, uiText] = await Promise.all([
+          (async () => {
+            let resText = "";
+            if (dbPlatform && dbPlatform.toLowerCase() === "none") {
+              await addLog("Data Architect", "Database Platform set to None (Stateless / In-Memory). Skipping Data Architect schema generation.", "info");
+              resText = "[NO_DATABASE_REQUIRED] Database Platform set to None. No database schemas required for this project.";
+            } else {
+              const dataPrompt = `Based on this PRD: ${cleanPrd} and System Architecture: ${cleanArch}, assess if a persistent database is required. If NOT needed, output '[NO_DATABASE_REQUIRED]'. Otherwise, design the database schemas, tables, indexes, and write migration scripts. Output clean database definition scripts, structured with path headers pointing to the data/ directory (e.g. ## data/schema.sql or ## data/migrations/V001__init.sql).`;
+              const dataResponse = await callGeminiWithRetry(
+                apiKey,
+                targetModel,
+                getPersonaSystemPrompt("Data Architect"),
+                dataPrompt,
+                addLog,
+                "Data Architect",
+                projectId,
+                useCache
+              );
+
+              if (dataResponse.content && dataResponse.content[0] && "text" in dataResponse.content[0]) {
+                resText = (dataResponse.content[0] as any).text;
+              }
+
+              const dataInput = dataResponse.usage?.input_tokens;
+              const dataOutput = dataResponse.usage?.output_tokens;
+              traceLlmCall("Data Architect", dataPrompt, resText, dataInput, dataOutput);
+              await updateCost(dataInput, dataOutput);
+
+              if (resText.includes("[NO_DATABASE_REQUIRED]")) {
+                await addLog("Data Architect", "No persistent database required for this stateless service. Skipping DB schema files.", "info");
+                resText = "[NO_DATABASE_REQUIRED] No database storage required for this project.";
+              } else {
+                if (cohereClient) {
+                  await addLog("Data Architect", "Invoking Cohere to refine and critique database schemas...", "info");
+                  const refinement = await callCohereToCritique(cohereClient, resText, "Data Architect");
+                  resText += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
+                }
+
+                if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
+
+                resText = await validateAndReviseResponse(
+                  apiKey || "",
+                  targetModel,
+                  "Data Architect",
+                  getPersonaSystemPrompt("Data Architect"),
+                  dataPrompt,
+                  resText,
+                  "Product Manager",
+                  getPersonaSystemPrompt("Product Manager"),
+                  cleanPrd,
+                  projectId,
+                  addLog,
+                  useCache,
+                  updateCost
+                );
+
+                writeProjectFiles(projectId, language, resText || "-- Generated database schema", false);
+                await addLog("Data Architect", `Database schemas generated successfully:\n${resText.substring(0, 150)}...`, "success");
+                writeDataFile(projectId, "database.md", resText);
+              }
+            }
+            completedStatuses.add("DATA_DB");
+            return resText;
+          })(),
+          (async () => {
+            const uiPrompt = `Based on this PRD: ${cleanPrd} and System Architecture: ${cleanArch}, assess if a graphical UI is required. If NOT needed, output '[NO_UI_REQUIRED]'. Otherwise, design the UI page layouts, component hierarchy, and CSS styling tokens.`;
+            const uiResponse = await callGeminiWithRetry(
+              apiKey,
+              targetModel,
+              getPersonaSystemPrompt("UI/UX Designer"),
+              uiPrompt,
+              addLog,
+              "UI/UX Designer",
+              projectId,
+              useCache
+            );
+
+            let resText = "";
+            if (uiResponse.content && uiResponse.content[0] && "text" in uiResponse.content[0]) {
+              resText = (uiResponse.content[0] as any).text;
+            }
+
+            const uiInput = uiResponse.usage?.input_tokens;
+            const uiOutput = uiResponse.usage?.output_tokens;
+            traceLlmCall("UI/UX Designer", uiPrompt, resText, uiInput, uiOutput);
+            await updateCost(uiInput, uiOutput);
+
+            if (resText.includes("[NO_UI_REQUIRED]")) {
+              await addLog("UI/UX Designer", "No graphical UI required for this project. Skipping frontend layout files.", "info");
+              resText = "[NO_UI_REQUIRED] No frontend UI required for this project.";
+            } else {
+              if (cohereClient) {
+                await addLog("UI/UX Designer", "Invoking Cohere to refine and critique UI layouts...", "info");
+                const refinement = await callCohereToCritique(cohereClient, resText, "UI/UX Designer");
+                resText += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
+              }
+
+              if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
+
+              resText = await validateAndReviseResponse(
+                apiKey || "",
+                targetModel,
+                "UI/UX Designer",
+                getPersonaSystemPrompt("UI/UX Designer"),
+                uiPrompt,
+                resText,
+                "Product Manager",
+                getPersonaSystemPrompt("Product Manager"),
+                cleanPrd,
+                projectId,
+                addLog,
+                useCache,
+                updateCost
+              );
+
+              writeProjectFiles(projectId, language, resText || "/* Generated UI/UX styles */", false);
+              await addLog("UI/UX Designer", `UI layouts & tokens drafted successfully:\n${resText.substring(0, 150)}...`, "success");
+              writeDataFile(projectId, "ui_ux.md", resText);
+            }
+            completedStatuses.add("UI_DESIGN");
+            return resText;
+          })()
+        ]);
+
+        // Phase 2: Modular DAG Code Generator
+        currentStatus = "GENERATING";
+        await addLog("Developer Agent", "Generating architectural file manifest for modular code synthesis...", "info");
+
+        const cleanData = stripCritiqueHeaders(dataText);
+        const cleanUi = stripCritiqueHeaders(uiText);
+
+        const manifestPrompt = `Based on PRD: ${cleanPrd}, System Architecture: ${cleanArch}, DB Schema: ${cleanData}, and UI Spec: ${cleanUi}, output a JSON file manifest listing all the target source code files needed for this ${language} project.
+Return JSON ONLY in the format:
+{
+  "files": [
+    { "path": "relative/path/to/file.ext", "description": "Purpose of file" }
+  ]
+}`;
+
+        const manifestRes = await callGeminiWithRetry(
+          apiKey,
+          targetModel,
+          getPersonaSystemPrompt("Developer Agent"),
+          manifestPrompt,
+          addLog,
+          "Developer Agent",
+          projectId,
+          useCache
+        );
+
+        let manifestJsonText = "";
+        if (manifestRes.content && manifestRes.content[0] && "text" in manifestRes.content[0]) {
+          manifestJsonText = (manifestRes.content[0] as any).text;
+        }
+
+        let targetFileList: Array<{ path: string; description: string }> = [];
+        try {
+          const cleanedJson = manifestJsonText.replace(/```json/g, "").replace(/```/g, "").trim();
+          const parsed = JSON.parse(cleanedJson);
+          if (Array.isArray(parsed.files)) {
+            targetFileList = parsed.files;
+          }
+        } catch (e) {
+          console.warn("[ValkyrieSwarm] Manifest JSON parsing fallback triggered.");
+        }
+
+        let codeText = "";
+
+        if (targetFileList.length > 0) {
+          await addLog("Developer Agent", `Architectural manifest generated (${targetFileList.length} target modules). Synthesizing code modularly...`, "info");
+          for (const fileObj of targetFileList) {
+            if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
+            const filePrompt = `Generate the exact code contents for file '${fileObj.path}' (${fileObj.description}).
+Language: ${language}
+Description: ${description}
+PRD: ${cleanPrd}
+Architecture: ${cleanArch}
+DB Schema: ${cleanData}
+UI Spec: ${cleanUi}
+
+Output clean code structured with path header:
+## ${fileObj.path}
+[code content]`;
+
+            const fileRes = await callGeminiWithRetry(
+              apiKey,
+              targetModel,
+              getPersonaSystemPrompt("Developer Agent"),
+              filePrompt,
+              addLog,
+              "Developer Agent",
+              projectId,
+              useCache
+            );
+
+            let fileCode = "";
+            if (fileRes.content && fileRes.content[0] && "text" in fileRes.content[0]) {
+              fileCode = (fileRes.content[0] as any).text;
+            }
+            const fInput = fileRes.usage?.input_tokens;
+            const fOutput = fileRes.usage?.output_tokens;
+            await updateCost(fInput, fOutput);
+
+            writeProjectFiles(projectId, language, fileCode, false);
+            codeText += `\n\n${fileCode}`;
+          }
         } else {
-          await addLog("Data Architect", "Outlining database schemas and storage models.", "info");
-          const dataPrompt = `Based on this PRD: ${prd} and System Architecture: ${archText}, assess if a persistent database is required. If NOT needed, output '[NO_DATABASE_REQUIRED]'. Otherwise, design the database schemas, tables, indexes, and write migration scripts. Output clean database definition scripts, structured with path headers pointing to the data/ directory (e.g. ## data/schema.sql or ## data/migrations/V001__init.sql).`;
-          const dataResponse = await callGeminiWithRetry(
+          // Single pass fallback if manifest JSON is unavailable
+          const devPrompt = `Generate the complete source code files for: ${description}.\nPRD: ${cleanPrd}\nArchitecture: ${cleanArch}\nDB Schema: ${cleanData}\nUI Spec: ${cleanUi}\nOutput clean code structured with path headers (e.g. ## path/to/file).`;
+          const codeResponse = await callGeminiWithRetry(
             apiKey,
             targetModel,
-            getPersonaSystemPrompt("Data Architect"),
-            dataPrompt,
+            getPersonaSystemPrompt("Developer Agent"),
+            devPrompt,
             addLog,
-            "Data Architect",
+            "Developer Agent",
             projectId,
             useCache
           );
 
-          if (dataResponse.content && dataResponse.content[0] && "text" in dataResponse.content[0]) {
-            dataText = (dataResponse.content[0] as any).text;
+          if (codeResponse.content && codeResponse.content[0] && "text" in codeResponse.content[0]) {
+            codeText = (codeResponse.content[0] as any).text;
           }
-
-          const dataInput = dataResponse.usage?.input_tokens;
-          const dataOutput = dataResponse.usage?.output_tokens;
-          traceLlmCall("Data Architect", dataPrompt, dataText, dataInput, dataOutput);
-          await updateCost(dataInput, dataOutput);
-
-          if (dataText.includes("[NO_DATABASE_REQUIRED]")) {
-            await addLog("Data Architect", "No persistent database required for this stateless service. Skipping DB schema files.", "info");
-            dataText = "[NO_DATABASE_REQUIRED] No database storage required for this project.";
-          } else {
-            if (cohereClient) {
-              await addLog("Data Architect", "Invoking Cohere to refine and critique database schemas...", "info");
-              const refinement = await callCohereToCritique(cohereClient, dataText, "Data Architect");
-              dataText += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
-            }
-
-            if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-
-            // PM Validation loop for Data Architect
-            dataText = await validateAndReviseResponse(
-              apiKey || "",
-              targetModel,
-              "Data Architect",
-              getPersonaSystemPrompt("Data Architect"),
-              dataPrompt,
-              dataText,
-              "Product Manager",
-              getPersonaSystemPrompt("Product Manager"),
-              prd,
-              projectId,
-              addLog,
-              useCache,
-              updateCost
-            );
-
-            // Scaffolding database files
-            writeProjectFiles(projectId, language, dataText || "-- Generated database schema", false);
-            await addLog("Data Architect", `Database schemas generated successfully:\n${dataText.substring(0, 150)}...`, "success");
-            writeDataFile(projectId, "database.md", dataText);
-          }
-          completedStatuses.add("DATA_DB");
+          writeProjectFiles(projectId, language, codeText, false);
         }
-
-        // Live UI/UX Designer call
-        currentStatus = "UI_DESIGN";
-        await addLog("UI/UX Designer", "Drafting system page layouts and UI styling tokens.", "info");
-        const uiPrompt = `Based on this PRD: ${prd}, System Architecture: ${archText}, and DB models: ${dataText}, assess if a graphical UI is required. If NOT needed, output '[NO_UI_REQUIRED]'. Otherwise, design the UI page layouts, component hierarchy, and CSS styling tokens.`;
-        const uiResponse = await callGeminiWithRetry(
-          apiKey,
-          targetModel,
-          getPersonaSystemPrompt("UI/UX Designer"),
-          uiPrompt,
-          addLog,
-          "UI/UX Designer",
-          projectId,
-          useCache
-        );
-
-        let uiText = "";
-        if (uiResponse.content && uiResponse.content[0] && "text" in uiResponse.content[0]) {
-          uiText = (uiResponse.content[0] as any).text;
-        }
-
-        const uiInput = uiResponse.usage?.input_tokens;
-        const uiOutput = uiResponse.usage?.output_tokens;
-        traceLlmCall("UI/UX Designer", uiPrompt, uiText, uiInput, uiOutput);
-        await updateCost(uiInput, uiOutput);
-
-        if (uiText.includes("[NO_UI_REQUIRED]")) {
-          await addLog("UI/UX Designer", "No graphical UI required for this project. Skipping frontend layout files.", "info");
-          uiText = "[NO_UI_REQUIRED] No frontend UI required for this project.";
-        } else {
-          if (cohereClient) {
-            await addLog("UI/UX Designer", "Invoking Cohere to refine and critique UI layouts...", "info");
-            const refinement = await callCohereToCritique(cohereClient, uiText, "UI/UX Designer");
-            uiText += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
-          }
-
-          if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-
-          // PM Validation loop for UI/UX Designer
-          uiText = await validateAndReviseResponse(
-            apiKey || "",
-            targetModel,
-            "UI/UX Designer",
-            getPersonaSystemPrompt("UI/UX Designer"),
-            uiPrompt,
-            uiText,
-            "Product Manager",
-            getPersonaSystemPrompt("Product Manager"),
-            prd,
-            projectId,
-            addLog,
-            useCache,
-            updateCost
-          );
-
-          // Scaffolding UI files
-          writeProjectFiles(projectId, language, uiText || "/* Generated UI/UX styles */", false);
-          await addLog("UI/UX Designer", `UI/UX spec generated successfully:\n${uiText.substring(0, 150)}...`, "success");
-          writeDataFile(projectId, "ui_ux.md", uiText);
-        }
-        writeDocFile(projectId, "ui_ux.md", uiText);
-        completedStatuses.add("UI_DESIGN");
-
-        // Live Code Gen call
-        currentStatus = "GENERATING";
-        await addLog("Developer Agent", "Synthesizing code modules based on instructions.", "info");
-        const devPrompt = `Generate the complete source code files for the following application: ${description}.
-Use the following inputs created by your swarm colleagues:
-1. Product Requirements Document (PRD):
-${prd}
-
-2. System Directory Architecture:
-${archText}
-
-3. Database Schema Design:
-${dataText}
-
-4. UI/UX Component & Layout Specification:
-${uiText}
-
-Ensure that any database/schema related source code files (such as SQL tables, DB migrations, model entities) are stored in the data/ directory.
-Ensure that any code written is properly and thoroughly documented. Include comprehensive docstrings, inline comments, variable descriptions, and API parameter details.
-Output clean, fully functioning, and well-documented source code files, structured with path headers (e.g. ## path/to/file).`;
-
-        const codeResponse = await callGeminiWithRetry(
-          apiKey,
-          targetModel,
-          getPersonaSystemPrompt("Developer Agent"),
-          devPrompt,
-          addLog,
-          "Developer Agent",
-          projectId,
-          useCache
-        );
-
-        let codeText = "";
-        if (codeResponse.content && codeResponse.content[0] && "text" in codeResponse.content[0]) {
-          codeText = (codeResponse.content[0] as any).text;
-        }
-
-        const codeInput = codeResponse.usage?.input_tokens;
-        const codeOutput = codeResponse.usage?.output_tokens;
-        traceLlmCall("Developer Agent", devPrompt, codeText, codeInput, codeOutput);
-        await updateCost(codeInput, codeOutput);
-
-        if (cohereClient) {
-          await addLog("Developer Agent", "Invoking Cohere to refine and critique code modules...", "info");
-          const refinement = await callCohereToCritique(cohereClient, codeText, "Developer Agent");
-          codeText += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
-        }
-
-        if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-
-        // Software Architect Validation loop for Developer Agent
-        codeText = await validateAndReviseResponse(
-          apiKey || "",
-          targetModel,
-          "Developer Agent",
-          getPersonaSystemPrompt("Developer Agent"),
-          devPrompt,
-          codeText,
-          "Software Architect",
-          getPersonaSystemPrompt("Software Architect"),
-          `System PRD Requirements:\n${prd}\n\nSystem Scaffolding & Directory Architecture:\n${archText}`,
-          projectId,
-          addLog,
-          useCache,
-          updateCost
-        );
 
         // Live Security Architect Audit
         currentStatus = "AUDITING";
@@ -1222,7 +1286,7 @@ Output clean, fully functioning, and well-documented source code files, structur
           targetModel,
           "Developer Agent",
           getPersonaSystemPrompt("Developer Agent"),
-          devPrompt,
+          "Ensure code contains no security vulnerabilities.",
           codeText,
           "Security Architect",
           getPersonaSystemPrompt("Security Architect"),
@@ -1729,12 +1793,17 @@ app.get("/api/projects/:id/stream", { preHandler: [authMiddleware] }, async (req
 // REST: Get full agent run details including logs
 app.get("/api/projects/:id/run", { preHandler: [authMiddleware] }, async (req: FastifyRequest, reply: FastifyReply) => {
   const projectId = (req.params as any).id;
+  const user = (req as any).user;
+  if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) {
+    return reply.status(400).send({ error: "Invalid project ID format." });
+  }
+
   try {
     const run = await prisma.agentRun.findUnique({
       where: { id: projectId },
       include: { project: true }
     });
-    if (!run) {
+    if (!run || (user.role !== "admin" && run.project.tenantId !== user.tenantId)) {
       return reply.status(404).send({ error: "Agent run not found." });
     }
     let parsedLogs = [];
@@ -1757,8 +1826,11 @@ app.get("/api/projects/:id/run", { preHandler: [authMiddleware] }, async (req: F
 
 // REST: Get all projects
 app.get("/api/projects", { preHandler: [authMiddleware] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  const user = (req as any).user;
   try {
+    const whereClause = user.role === "admin" ? {} : { tenantId: user.tenantId };
     const projects = await prisma.project.findMany({
+      where: whereClause,
       include: {
         agentRuns: true
       },
@@ -1774,6 +1846,23 @@ app.get("/api/projects", { preHandler: [authMiddleware] }, async (req: FastifyRe
 
 // REST: Query pending projects in QA_LOOP for QA Runner daemon
 app.get("/api/projects/pending-qa", async (req: FastifyRequest, reply: FastifyReply) => {
+  const authHeader = req.headers.authorization;
+  const internalSecret = process.env.ORCHESTRATOR_INTERNAL_SECRET || "valkyrie_internal_daemon_secret";
+  const internalKey = req.headers["x-valkyrie-qa-key"];
+
+  if (internalKey !== internalSecret) {
+    let authorized = false;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      try {
+        jwt.verify(authHeader.substring(7), JWT_SECRET);
+        authorized = true;
+      } catch (e) { }
+    }
+    if (!authorized) {
+      return reply.status(401).send({ error: "Unauthorized: Missing daemon security token" });
+    }
+  }
+
   try {
     const runs = await prisma.agentRun.findMany({
       where: {
@@ -1799,18 +1888,30 @@ app.get("/api/projects/pending-qa", async (req: FastifyRequest, reply: FastifyRe
 // REST: Delete a project and its workspace
 app.delete("/api/projects/:id", { preHandler: [authMiddleware, requireRole(["admin", "user"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
   const projectId = (req.params as any).id;
+  const user = (req as any).user;
+  if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) {
+    return reply.status(400).send({ error: "Invalid project ID format." });
+  }
+
   try {
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project || (user.role !== "admin" && project.tenantId !== user.tenantId)) {
+      return reply.status(404).send({ error: "Project not found." });
+    }
+
     await prisma.project.delete({
       where: { id: projectId }
     });
 
-    const dirPath = path.join(__dirname, `../../../generated/${projectId}`);
-    if (fs.existsSync(dirPath)) {
+    const basePath = path.resolve(__dirname, "../../../generated");
+    const dirPath = path.resolve(basePath, projectId);
+    if (dirPath.startsWith(basePath) && fs.existsSync(dirPath)) {
       fs.rmSync(dirPath, { recursive: true, force: true });
     }
 
-    const sandboxPath = path.join(__dirname, `../../qa-runner/sandbox/${projectId}`);
-    if (fs.existsSync(sandboxPath)) {
+    const sandboxBasePath = path.resolve(__dirname, "../../qa-runner/sandbox");
+    const sandboxPath = path.resolve(sandboxBasePath, projectId);
+    if (sandboxPath.startsWith(sandboxBasePath) && fs.existsSync(sandboxPath)) {
       fs.rmSync(sandboxPath, { recursive: true, force: true });
     }
 
@@ -1823,13 +1924,19 @@ app.delete("/api/projects/:id", { preHandler: [authMiddleware, requireRole(["adm
 // REST: Restart active agent pipeline swarm
 app.post("/api/projects/:id/restart", { preHandler: [authMiddleware, requireRole(["admin", "user"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
   const projectId = (req.params as any).id;
+  const user = (req as any).user;
   const useCache = (req.body as any)?.useCache !== false;
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) {
+    return reply.status(400).send({ error: "Invalid project ID format." });
+  }
+
   try {
     const project = await prisma.project.findUnique({
       where: { id: projectId }
     });
 
-    if (!project) {
+    if (!project || (user.role !== "admin" && project.tenantId !== user.tenantId)) {
       return reply.status(404).send({ error: "Project not found." });
     }
 
@@ -1868,7 +1975,18 @@ app.post("/api/projects/:id/restart", { preHandler: [authMiddleware, requireRole
 // REST: Cancel active agent pipeline swarm
 app.post("/api/projects/:id/cancel", { preHandler: [authMiddleware, requireRole(["admin", "user"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
   const projectId = (req.params as any).id;
+  const user = (req as any).user;
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) {
+    return reply.status(400).send({ error: "Invalid project ID format." });
+  }
+
   try {
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project || (user.role !== "admin" && project.tenantId !== user.tenantId)) {
+      return reply.status(404).send({ error: "Project not found." });
+    }
+
     cancelledRuns.add(projectId);
 
     await prisma.agentRun.updateMany({
@@ -1905,16 +2023,32 @@ function getFilesRecursively(dir: string, baseDir: string = dir): Array<{ name: 
   return results;
 }
 
-// REST: Get files for local QA runner CLI
-app.get("/api/projects/:id/files", async (req: FastifyRequest, reply: FastifyReply) => {
+// REST: Get files for local QA runner CLI or authorized user
+app.get("/api/projects/:id/files", { preHandler: [authMiddleware] }, async (req: FastifyRequest, reply: FastifyReply) => {
   const projectId = (req.params as any).id;
-  const dirPath = path.join(__dirname, `../../../generated/${projectId}`);
+  const user = (req as any).user;
 
-  if (!fs.existsSync(dirPath)) {
-    return reply.status(404).send({ error: "No generated files found for this project." });
+  if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) {
+    return reply.status(400).send({ error: "Invalid project ID format." });
+  }
+
+  const basePath = path.resolve(__dirname, "../../../generated");
+  const dirPath = path.resolve(basePath, projectId);
+
+  if (!dirPath.startsWith(basePath)) {
+    return reply.status(400).send({ error: "Access denied: Invalid path traversal attempt." });
   }
 
   try {
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project || (user.role !== "admin" && project.tenantId !== user.tenantId)) {
+      return reply.status(404).send({ error: "No generated files found for this project." });
+    }
+
+    if (!fs.existsSync(dirPath)) {
+      return reply.status(404).send({ error: "No generated files found for this project." });
+    }
+
     const filesContent = getFilesRecursively(dirPath);
     return reply.send({ files: filesContent });
   } catch (err: any) {
@@ -1924,15 +2058,24 @@ app.get("/api/projects/:id/files", async (req: FastifyRequest, reply: FastifyRep
 });
 
 // REST: Get project run status
-app.get("/api/projects/:id/status", async (req: FastifyRequest, reply: FastifyReply) => {
+app.get("/api/projects/:id/status", { preHandler: [authMiddleware] }, async (req: FastifyRequest, reply: FastifyReply) => {
   const projectId = (req.params as any).id;
+  const user = (req as any).user;
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) {
+    return reply.status(400).send({ error: "Invalid project ID format." });
+  }
+
   try {
     const run = await prisma.agentRun.findUnique({
-      where: { id: projectId }
+      where: { id: projectId },
+      include: { project: true }
     });
-    if (!run) {
+
+    if (!run || (user.role !== "admin" && run.project.tenantId !== user.tenantId)) {
       return reply.status(404).send({ error: "Agent run not found." });
     }
+
     return reply.send({ status: run.status });
   } catch (err: any) {
     return reply.status(500).send({ error: err.message });
@@ -1947,6 +2090,12 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
   try {
     const files = getFilesRecursively(dirPath);
 
+    // Track attempt history for diff memory
+    let history = qaFixAttemptHistory.get(projectId) || [];
+    const currentAttempt = history.length + 1;
+    history.push({ attempt: currentAttempt, errors, logs });
+    qaFixAttemptHistory.set(projectId, history);
+
     let codebasePrompt = "You are the Developer Agent in a multi-agent application swarm. A bug was found in the generated codebase.\n\n";
     codebasePrompt += "Here is the current codebase:\n";
     files.forEach(f => {
@@ -1960,6 +2109,15 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
     logs.forEach((log: string) => {
       codebasePrompt += `- ${log}\n`;
     });
+
+    if (history.length > 1) {
+      codebasePrompt += "\n=== PREVIOUS FIX ATTEMPTS & FAILURES ===\n";
+      history.slice(0, -1).forEach(h => {
+        codebasePrompt += `Attempt #${h.attempt} failed with errors: ${h.errors.join("; ")}\n`;
+      });
+      codebasePrompt += "CRITICAL: Do NOT repeat the exact same modifications made in previous failed attempts. Address the underlying root cause differently to avoid oscillation.\n";
+    }
+
     codebasePrompt += "\nPlease analyze the errors and logs, modify the code files to fix the issues, and return the updated files. Ensure that database schemas or data layouts are correct. Include proper documentation. Output the updated files using path headers (e.g. ## path/to/file) so the file writer can save them to disk.";
 
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.ANTHROPIC_API_KEY || "";
@@ -2067,6 +2225,23 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
 
 // REST: Submit QA report
 app.post("/api/projects/:id/qa-report", async (req: FastifyRequest, reply: FastifyReply) => {
+  const authHeader = req.headers.authorization;
+  const internalSecret = process.env.ORCHESTRATOR_INTERNAL_SECRET || "valkyrie_internal_daemon_secret";
+  const internalKey = req.headers["x-valkyrie-qa-key"];
+
+  if (internalKey !== internalSecret) {
+    let authorized = false;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      try {
+        jwt.verify(authHeader.substring(7), JWT_SECRET);
+        authorized = true;
+      } catch (e) { }
+    }
+    if (!authorized) {
+      return reply.status(401).send({ error: "Unauthorized: Missing authentication credentials for QA report" });
+    }
+  }
+
   const projectId = (req.params as any).id;
   const { passed, logs, errors } = req.body as any || {};
 
@@ -2478,7 +2653,17 @@ async function updateGithubIssue(
 
 // Git Init, Commit & Remote GitHub push executor
 async function pushToGithub(projectId: string, repoUrl: string) {
-  const dirPath = path.join(__dirname, `../../../generated/${projectId}`);
+  const basePath = path.resolve(__dirname, "../../../generated");
+  const dirPath = path.resolve(basePath, projectId);
+
+  if (!dirPath.startsWith(basePath)) {
+    return { success: false, message: "Invalid project path traversal attempt." };
+  }
+
+  // Validate repoUrl format if provided
+  if (repoUrl && !/^https?:\/\/[a-zA-Z0-9.:\/-]+\/[a-zA-Z0-9_.-]+(?:\.git)?$/.test(repoUrl)) {
+    return { success: false, message: "Invalid Git repository URL format." };
+  }
 
   // Load token based on Git Auth configuration
   let token = process.env.GITHUB_TOKEN || "";
@@ -2495,13 +2680,13 @@ async function pushToGithub(projectId: string, repoUrl: string) {
   }
 
   try {
-    await execAsync("git init", { cwd: dirPath });
-    await execAsync('git config user.name "Valkyrie Swarm"', { cwd: dirPath });
-    await execAsync('git config user.email "swarm@valkyrie.app"', { cwd: dirPath });
-    await execAsync("git add .", { cwd: dirPath });
+    await execFileAsync("git", ["init"], { cwd: dirPath });
+    await execFileAsync("git", ["config", "user.name", "Valkyrie Swarm"], { cwd: dirPath });
+    await execFileAsync("git", ["config", "user.email", "swarm@valkyrie.app"], { cwd: dirPath });
+    await execFileAsync("git", ["add", "."], { cwd: dirPath });
 
     try {
-      await execAsync('git commit -m "Scaffold from Valkyrie multi-agent swarm"', { cwd: dirPath });
+      await execFileAsync("git", ["commit", "-m", "Scaffold from Valkyrie multi-agent swarm"], { cwd: dirPath });
     } catch (commitErr: any) {
       const fullOutput = `${commitErr.message || ''} ${commitErr.stdout || ''} ${commitErr.stderr || ''}`;
       if (!fullOutput.includes("nothing to commit") && !fullOutput.includes("working tree clean")) {
@@ -2517,16 +2702,16 @@ async function pushToGithub(projectId: string, repoUrl: string) {
 
       const remoteUrl = `https://oauth2:${token}@${repoPath}`;
       try {
-        await execAsync("git remote remove origin", { cwd: dirPath });
+        await execFileAsync("git", ["remote", "remove", "origin"], { cwd: dirPath });
       } catch (e) { }
 
-      await execAsync(`git remote add origin ${remoteUrl}`, { cwd: dirPath });
-      await execAsync("git branch -M main", { cwd: dirPath });
-      await execAsync("git push -u origin main --force", { cwd: dirPath });
+      await execFileAsync("git", ["remote", "add", "origin", remoteUrl], { cwd: dirPath });
+      await execFileAsync("git", ["branch", "-M", "main"], { cwd: dirPath });
+      await execFileAsync("git", ["push", "-u", "origin", "main", "--force"], { cwd: dirPath });
 
       let commitHash = "";
       try {
-        const hashRes = await execAsync("git rev-parse HEAD", { cwd: dirPath });
+        const hashRes = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: dirPath });
         commitHash = hashRes.stdout.trim();
       } catch (e) { }
 
@@ -2542,8 +2727,9 @@ async function pushToGithub(projectId: string, repoUrl: string) {
     }
     return { success: true, message: "Locally initialized git repository and committed code successfully." };
   } catch (err: any) {
-    console.error("Git integration error:", err.message);
-    return { success: false, message: `VCS commit error: ${err.message}` };
+    const sanitizedMsg = (err.message || "").replace(/https:\/\/oauth2:[^@]+@/g, "https://oauth2:***@");
+    console.error("Git integration error:", sanitizedMsg);
+    return { success: false, message: `VCS commit error: ${sanitizedMsg}` };
   }
 }
 
