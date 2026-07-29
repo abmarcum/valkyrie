@@ -490,7 +490,7 @@ app.get("/api/admin/users", { preHandler: [authMiddleware, requireRole(["admin"]
 
 // REST: Initialize and trigger agent swarm
 app.post("/api/projects/run", { preHandler: [authMiddleware, requireRole(["admin", "user"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
-  const { projectId, projectName, language, cloud, description, vcsRepo, vcsAuthType, githubInstallationId, tenantId } = req.body as any || {};
+  const { projectId, projectName, language, cloud, dbPlatform, description, vcsRepo, vcsAuthType, githubInstallationId, tenantId } = req.body as any || {};
   const userSession = (req as any).user;
 
   try {
@@ -530,7 +530,7 @@ app.post("/api/projects/run", { preHandler: [authMiddleware, requireRole(["admin
     });
 
     // 3. Trigger execution asynchronously
-    runAgentPipeline(projectId, projectName, language, cloud, description, vcsRepo);
+    runAgentPipeline(projectId, projectName, language, cloud, description, vcsRepo, true, dbPlatform || "none");
 
     return reply.status(201).send({ status: "STARTED", projectId: project.id });
   } catch (err: any) {
@@ -788,7 +788,7 @@ async function callGeminiWithRetry(
 
       await addLog(
         agentName,
-        `${provider.toUpperCase()} API request failed (Attempt ${attempt}): ${errorMessage.substring(0, 120)}. Retrying...`,
+        `${provider.toUpperCase()} API request failed (Attempt ${attempt}/5): ${errorMessage.substring(0, 120)}. Retrying...`,
         "warning"
       );
 
@@ -810,7 +810,8 @@ async function runAgentPipeline(
   cloud: string,
   description: string,
   vcsRepo?: string,
-  useCache: boolean = true
+  useCache: boolean = true,
+  dbPlatform: string = "none"
 ) {
   // Clean generated folder to prevent stale/incorrect files from previous runs
   const projectDirPath = path.join(__dirname, `../../../generated/${projectId}`);
@@ -1017,64 +1018,71 @@ async function runAgentPipeline(
 
         // Live Data Architect call
         currentStatus = "DATA_DB";
-        await addLog("Data Architect", "Outlining database schemas and storage models.", "info");
-        const dataPrompt = `Based on this PRD: ${prd} and System Architecture: ${archText}, assess if a persistent database is required. If NOT needed, output '[NO_DATABASE_REQUIRED]'. Otherwise, design the database schemas, tables, indexes, and write migration scripts. Output clean database definition scripts, structured with path headers pointing to the data/ directory (e.g. ## data/schema.sql or ## data/migrations/V001__init.sql).`;
-        const dataResponse = await callGeminiWithRetry(
-          apiKey,
-          targetModel,
-          getPersonaSystemPrompt("Data Architect"),
-          dataPrompt,
-          addLog,
-          "Data Architect",
-          projectId,
-          useCache
-        );
-
         let dataText = "";
-        if (dataResponse.content && dataResponse.content[0] && "text" in dataResponse.content[0]) {
-          dataText = (dataResponse.content[0] as any).text;
-        }
 
-        const dataInput = dataResponse.usage?.input_tokens;
-        const dataOutput = dataResponse.usage?.output_tokens;
-        traceLlmCall("Data Architect", dataPrompt, dataText, dataInput, dataOutput);
-        await updateCost(dataInput, dataOutput);
-
-        if (dataText.includes("[NO_DATABASE_REQUIRED]")) {
-          await addLog("Data Architect", "No persistent database required for this stateless service. Skipping DB schema files.", "info");
-          dataText = "[NO_DATABASE_REQUIRED] No database storage required for this project.";
+        if (dbPlatform && dbPlatform.toLowerCase() === "none") {
+          await addLog("Data Architect", "Database Platform set to None (Stateless / In-Memory). Skipping Data Architect schema generation.", "info");
+          dataText = "[NO_DATABASE_REQUIRED] Database Platform set to None. No database schemas required for this project.";
+          completedStatuses.add("DATA_DB");
         } else {
-          if (cohereClient) {
-            await addLog("Data Architect", "Invoking Cohere to refine and critique database schemas...", "info");
-            const refinement = await callCohereToCritique(cohereClient, dataText, "Data Architect");
-            dataText += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
-          }
-
-          if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-
-          // PM Validation loop for Data Architect
-          dataText = await validateAndReviseResponse(
-            apiKey || "",
+          await addLog("Data Architect", "Outlining database schemas and storage models.", "info");
+          const dataPrompt = `Based on this PRD: ${prd} and System Architecture: ${archText}, assess if a persistent database is required. If NOT needed, output '[NO_DATABASE_REQUIRED]'. Otherwise, design the database schemas, tables, indexes, and write migration scripts. Output clean database definition scripts, structured with path headers pointing to the data/ directory (e.g. ## data/schema.sql or ## data/migrations/V001__init.sql).`;
+          const dataResponse = await callGeminiWithRetry(
+            apiKey,
             targetModel,
-            "Data Architect",
             getPersonaSystemPrompt("Data Architect"),
             dataPrompt,
-            dataText,
-            "Product Manager",
-            getPersonaSystemPrompt("Product Manager"),
-            prd,
-            projectId,
             addLog,
-            useCache,
-            updateCost
+            "Data Architect",
+            projectId,
+            useCache
           );
 
-          // Scaffolding database files
-          writeProjectFiles(projectId, language, dataText || "-- Generated database schema", false);
-          await addLog("Data Architect", `Database schemas generated successfully:\n${dataText.substring(0, 150)}...`, "success");
-          writeDataFile(projectId, "database.md", dataText);
+          if (dataResponse.content && dataResponse.content[0] && "text" in dataResponse.content[0]) {
+            dataText = (dataResponse.content[0] as any).text;
+          }
+
+          const dataInput = dataResponse.usage?.input_tokens;
+          const dataOutput = dataResponse.usage?.output_tokens;
+          traceLlmCall("Data Architect", dataPrompt, dataText, dataInput, dataOutput);
+          await updateCost(dataInput, dataOutput);
+
+          if (dataText.includes("[NO_DATABASE_REQUIRED]")) {
+            await addLog("Data Architect", "No persistent database required for this stateless service. Skipping DB schema files.", "info");
+            dataText = "[NO_DATABASE_REQUIRED] No database storage required for this project.";
+          } else {
+            if (cohereClient) {
+              await addLog("Data Architect", "Invoking Cohere to refine and critique database schemas...", "info");
+              const refinement = await callCohereToCritique(cohereClient, dataText, "Data Architect");
+              dataText += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
+            }
+
+            if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
+
+            // PM Validation loop for Data Architect
+            dataText = await validateAndReviseResponse(
+              apiKey || "",
+              targetModel,
+              "Data Architect",
+              getPersonaSystemPrompt("Data Architect"),
+              dataPrompt,
+              dataText,
+              "Product Manager",
+              getPersonaSystemPrompt("Product Manager"),
+              prd,
+              projectId,
+              addLog,
+              useCache,
+              updateCost
+            );
+
+            // Scaffolding database files
+            writeProjectFiles(projectId, language, dataText || "-- Generated database schema", false);
+            await addLog("Data Architect", `Database schemas generated successfully:\n${dataText.substring(0, 150)}...`, "success");
+            writeDataFile(projectId, "database.md", dataText);
+          }
+          completedStatuses.add("DATA_DB");
         }
-        completedStatuses.add("DATA_DB");
 
         // Live UI/UX Designer call
         currentStatus = "UI_DESIGN";
@@ -1318,12 +1326,22 @@ Structure each document with path headers (e.g. ## README.md or ## docs/api.md) 
 
       } catch (err: any) {
         if (err.message === "SWARM_CANCELLED") throw err;
-        await addLog("System", `Swarm execution error: ${err.message}. Falling back to scaffolded pipeline.`, "warning");
-        await fallbackPipeline(projectId, language, addLog, completedStatuses, vcsRepo);
+        await addLog("System", `[FATAL] Swarm execution failed: ${err.message}. Stopping project run.`, "error");
+        await prisma.agentRun.updateMany({
+          where: { projectId },
+          data: { status: "FAILED" }
+        });
+        notifyClients(projectId, { projectId, status: "FAILED" });
+        return;
       }
     } else {
-      await addLog("System", "Missing active provider settings or API credentials. Running scaffolded fallback pipelines.", "warning");
-      await fallbackPipeline(projectId, language, addLog, completedStatuses, vcsRepo);
+      await addLog("System", "[FATAL] Missing active provider settings or API credentials. Stopping project run.", "error");
+      await prisma.agentRun.updateMany({
+        where: { projectId },
+        data: { status: "FAILED" }
+      });
+      notifyClients(projectId, { projectId, status: "FAILED" });
+      return;
     }
 
     if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
@@ -1351,7 +1369,12 @@ Structure each document with path headers (e.g. ## README.md or ## docs/api.md) 
       });
       return;
     }
-    await addLog("System", `Swarm execution failed: ${err.message}`, "error");
+    await addLog("System", `[FATAL] Swarm execution failed: ${err.message}`, "error");
+    await prisma.agentRun.updateMany({
+      where: { projectId },
+      data: { status: "FAILED" }
+    });
+    notifyClients(projectId, { projectId, status: "FAILED" });
   }
 }
 

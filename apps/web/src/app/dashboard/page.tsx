@@ -257,6 +257,7 @@ export default function Dashboard() {
           projectName: name,
           language,
           cloud: cloud.toUpperCase(),
+          dbPlatform,
           description: combinedDescription,
           vcsRepo,
           vcsAuthType,
