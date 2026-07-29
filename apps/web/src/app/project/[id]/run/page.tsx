@@ -29,6 +29,16 @@ export default function RunPipeline() {
   const [user, setUser] = useState<UserSession | null>(null);
   
   const logsEndRef = useRef<HTMLDivElement | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyLogs = () => {
+    const formattedLogs = logs.map(l => `[${l.timestamp}] [${l.agent}] ${l.message}`).join("\n");
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(formattedLogs);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   const getSession = (): UserSession | null => {
     if (typeof window === "undefined") return null;
@@ -330,11 +340,33 @@ export default function RunPipeline() {
 
         {/* Right Side: SSE Agent Logs */}
         <section className="lg:col-span-2 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm shadow-xl flex flex-col min-h-[500px]">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-bold text-slate-100">Live Agent Debates & Output</h2>
-            <div className="flex items-center space-x-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-violet-500 animate-ping" />
-              <span className="text-xs text-slate-400 font-mono">SSE Telemetry Active</span>
+          <div className="flex flex-wrap justify-between items-center mb-6 gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-slate-100">Live Agent Debates & Output</h2>
+              <p className="text-xs text-slate-400">Real-time log stream from central orchestrator multi-agent swarm</p>
+            </div>
+            <div className="flex items-center space-x-3">
+              <button
+                onClick={handleCopyLogs}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-sans font-medium transition-all flex items-center space-x-1.5 shadow-sm active:scale-95 cursor-pointer"
+                title="Copy all live logs to clipboard"
+              >
+                {copied ? (
+                  <>
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span className="text-emerald-400 font-bold">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <span>📋</span>
+                    <span>Copy Logs</span>
+                  </>
+                )}
+              </button>
+              <div className="flex items-center space-x-2 bg-slate-950/60 px-3 py-1.5 rounded-lg border border-slate-800">
+                <span className="w-2.5 h-2.5 rounded-full bg-violet-500 animate-ping" />
+                <span className="text-xs text-slate-400 font-mono">SSE Active</span>
+              </div>
             </div>
           </div>
 
@@ -344,7 +376,7 @@ export default function RunPipeline() {
             </div>
           )}
 
-          <div className="flex-1 bg-slate-950 rounded-xl border border-slate-800 p-6 font-mono text-xs overflow-y-auto space-y-4 max-h-[450px]">
+          <div className="flex-1 bg-slate-950 rounded-xl border border-slate-800 p-6 font-mono text-xs overflow-y-scroll custom-scrollbar space-y-4 max-h-[500px]">
             {logs.map((log, index) => (
               <div key={index} className="space-y-1">
                 <div className="flex items-center space-x-2 text-[10px]">
@@ -352,7 +384,7 @@ export default function RunPipeline() {
                   <span className={`font-bold px-1.5 py-0.5 rounded ${
                     log.agent === "Developer Agent" 
                       ? "bg-indigo-500/10 text-indigo-400" 
-                      : log.agent === "QA Engineer (Local Runner)"
+                      : log.agent === "QA Engineer (Local Runner)" || log.agent === "QA Engineer (Runner)"
                       ? "bg-red-500/10 text-red-400"
                       : "bg-slate-800 text-slate-300"
                   }`}>
@@ -364,6 +396,8 @@ export default function RunPipeline() {
                     ? "text-emerald-400" 
                     : log.type === "error" 
                     ? "text-rose-400 font-semibold"
+                    : log.type === "warning"
+                    ? "text-amber-400"
                     : "text-slate-300"
                 }`}>
                   {log.message}
