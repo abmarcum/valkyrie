@@ -19,5 +19,5 @@ RUN npm run build --workspace=@valkyrie/orchestrator
 
 EXPOSE 4000
 
-# Start production Fastify orchestrator backend
-CMD ["node", "apps/orchestrator/dist/index.js"]
+# Start production Fastify orchestrator backend with automated schema push
+CMD ["sh", "-c", "npx prisma db push --schema=packages/db/prisma/schema.prisma && node apps/orchestrator/dist/index.js"]

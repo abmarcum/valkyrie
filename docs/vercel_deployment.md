@@ -145,7 +145,7 @@ Configure these variables in your cloud hosting provider:
    * **Output Directory**: `Default (.next)`
    * **Install Command**: `cd ../.. && npm install`
 4. Add the following **Environment Variable**:
-   * `NEXT_PUBLIC_ORCHESTRATOR_URL`: The HTTPS URL of your hosted Fastify backend (e.g. `https://valkyrie-orchestrator.onrender.com`).
+   * `NEXT_PUBLIC_ORCHESTRATOR_URL`: The HTTPS URL of your hosted Fastify backend (e.g. `https://valkyrie-api.fooguru.org`).
    * *Note: The Next.js frontend routes 100% of data traffic through the Fastify API and does NOT require direct database connections or `DATABASE_URL` credentials.*
 5. Click **Deploy**.
 
@@ -156,5 +156,5 @@ Configure these variables in your cloud hosting provider:
 The Local QA Runner is designed to run locally inside your test sandboxes. Set the `ORCHESTRATOR_URL` environment variable to point to your cloud hosted backend:
 
 ```bash
-docker run -e ORCHESTRATOR_URL=https://valkyrie-orchestrator.onrender.com valkyrie-qa-runner --project <projectId>
+docker run -e ORCHESTRATOR_URL=https://valkyrie-api.fooguru.org valkyrie-qa-runner --project <projectId>
 ```
