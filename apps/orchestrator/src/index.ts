@@ -843,8 +843,8 @@ async function runAgentPipeline(
     console.log(`[ValkyrieSwarm] [${agent}] [${type.toUpperCase()}] ${message}`);
 
     // Update DB
-    await prisma.agentRun.update({
-      where: { id: projectId },
+    await prisma.agentRun.updateMany({
+      where: { projectId },
       data: {
         logs: JSON.stringify(logs)
       }
@@ -908,8 +908,8 @@ async function runAgentPipeline(
         accumPromptTokens += pTokens;
         accumCompletionTokens += cTokens;
         const costUSD = calculateLlmCost(accumPromptTokens, accumCompletionTokens).totalCost;
-        await prisma.agentRun.update({
-          where: { id: projectId },
+        await prisma.agentRun.updateMany({
+          where: { projectId },
           data: {
             costInfo: JSON.stringify({
               promptTokens: accumPromptTokens,
@@ -1332,8 +1332,8 @@ Structure each document with path headers (e.g. ## README.md or ## docs/api.md) 
     currentStatus = "QA_LOOP";
     await addLog("QA Engineer (Runner)", "Scaffold files prepared. Awaiting local QA runner testing...", "info");
 
-    await prisma.agentRun.update({
-      where: { id: projectId },
+    await prisma.agentRun.updateMany({
+      where: { projectId },
       data: {
         status: "QA_LOOP"
       }
@@ -1343,8 +1343,8 @@ Structure each document with path headers (e.g. ## README.md or ## docs/api.md) 
       await addLog("System", "Swarm pipeline execution cancelled by user.", "warning");
       cancelledRuns.delete(projectId);
 
-      await prisma.agentRun.update({
-        where: { id: projectId },
+      await prisma.agentRun.updateMany({
+        where: { projectId },
         data: {
           status: "CANCELLED"
         }
@@ -1810,8 +1810,8 @@ app.post("/api/projects/:id/restart", { preHandler: [authMiddleware, requireRole
       return reply.status(404).send({ error: "Project not found." });
     }
 
-    await prisma.agentRun.update({
-      where: { id: projectId },
+    await prisma.agentRun.updateMany({
+      where: { projectId },
       data: {
         status: "PLANNING",
         logs: JSON.stringify([
@@ -1848,8 +1848,8 @@ app.post("/api/projects/:id/cancel", { preHandler: [authMiddleware, requireRole(
   try {
     cancelledRuns.add(projectId);
 
-    await prisma.agentRun.update({
-      where: { id: projectId },
+    await prisma.agentRun.updateMany({
+      where: { projectId },
       data: { status: "CANCELLED" }
     });
 
@@ -1954,8 +1954,8 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
           message,
           type
         });
-        await prisma.agentRun.update({
-          where: { id: projectId },
+        await prisma.agentRun.updateMany({
+          where: { projectId },
           data: { logs: JSON.stringify(logsArr) }
         });
         notifyClients(projectId, { projectId, logs: logsArr });
@@ -2031,8 +2031,8 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
 
     await addFixLog("Developer Agent", "Code fixes successfully applied. File updates committed to workspace. Re-triggering QA runner loop.", "success");
 
-    await prisma.agentRun.update({
-      where: { id: projectId },
+    await prisma.agentRun.updateMany({
+      where: { projectId },
       data: { status: "QA_LOOP" }
     });
     notifyClients(projectId, { projectId, status: "QA_LOOP" });
@@ -2116,8 +2116,8 @@ ${logs && logs.length > 0 ? logs.join("\n") : "(No stdout output)"}
         type: "info"
       });
 
-      await prisma.agentRun.update({
-        where: { id: projectId },
+      await prisma.agentRun.updateMany({
+        where: { projectId },
         data: {
           logs: JSON.stringify(updatedLogs),
           status: "GENERATING"
@@ -2143,8 +2143,8 @@ ${logs && logs.length > 0 ? logs.join("\n") : "(No stdout output)"}
         type: "success"
       });
 
-      await prisma.agentRun.update({
-        where: { id: projectId },
+      await prisma.agentRun.updateMany({
+        where: { projectId },
         data: {
           logs: JSON.stringify(updatedLogs),
           status: "ACTIVE"
