@@ -1,6 +1,5 @@
 #!/usr/bin/env tsx
 
-import http from "http";
 import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
@@ -39,71 +38,52 @@ export const projectId = explicitProjectId || "global-daemon";
 export const orchestratorUrl = process.env.ORCHESTRATOR_URL || "http://localhost:4000";
 
 // Helper to post JSON report
-export function sendReport(projId: string, passed: boolean, logs: string[], errors: string[]) {
-  const payload = JSON.stringify({ passed, logs, errors });
-  const url = new URL(`${orchestratorUrl}/api/projects/${projId}/qa-report`);
+export async function sendReport(projId: string, passed: boolean, logs: string[], errors: string[]) {
+  const url = `${orchestratorUrl}/api/projects/${projId}/qa-report`;
   const internalSecret = process.env.ORCHESTRATOR_INTERNAL_SECRET || "valkyrie_internal_daemon_secret";
-  
-  const req = http.request({
-    hostname: url.hostname,
-    port: url.port,
-    path: url.pathname,
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Content-Length": Buffer.byteLength(payload),
-      "x-valkyrie-qa-key": internalSecret
-    }
-  }, (res) => {
-    let data = "";
-    res.on("data", (chunk) => { data += chunk; });
-    res.on("end", () => {
-      console.log(`[Report Status] Central Server Response: ${res.statusCode} - ${data}`);
-      console.log(`QA run completed successfully.`);
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-valkyrie-qa-key": internalSecret
+      },
+      body: JSON.stringify({ passed, logs, errors }),
+      redirect: "follow"
     });
-  });
 
-  req.on("error", (err) => {
+    const data = await res.text();
+    console.log(`[Report Status] Central Server Response: ${res.status} - ${data}`);
+    console.log(`QA run completed successfully.`);
+  } catch (err: any) {
     console.error(`[Error] Failed to transmit report back to orchestrator:`, err.message);
-  });
-
-  req.write(payload);
-  req.end();
+  }
 }
 
 // Download files from orchestrator REST endpoint
-export function downloadWorkspaceFiles(projId: string = projectId): Promise<Array<{ name: string; content: string }>> {
-  return new Promise((resolve, reject) => {
-    const url = new URL(`${orchestratorUrl}/api/projects/${projId}/files`);
-    const internalSecret = process.env.ORCHESTRATOR_INTERNAL_SECRET || "valkyrie_internal_daemon_secret";
-    
-    http.get({
-      hostname: url.hostname,
-      port: url.port,
-      path: url.pathname,
+export async function downloadWorkspaceFiles(projId: string = projectId): Promise<Array<{ name: string; content: string }>> {
+  const url = `${orchestratorUrl}/api/projects/${projId}/files`;
+  const internalSecret = process.env.ORCHESTRATOR_INTERNAL_SECRET || "valkyrie_internal_daemon_secret";
+
+  try {
+    const res = await fetch(url, {
       headers: {
         "x-valkyrie-qa-key": internalSecret
-      }
-    }, (res) => {
-      if (res.statusCode !== 200) {
-        reject(new Error(`Failed to fetch project files. Status: ${res.statusCode}`));
-        return;
-      }
-      
-      let rawData = "";
-      res.on("data", (chunk) => { rawData += chunk; });
-      res.on("end", () => {
-        try {
-          const data = JSON.parse(rawData);
-          resolve(data.files || []);
-        } catch (e: any) {
-          reject(e);
-        }
-      });
-    }).on("error", (err) => {
-      reject(new Error(`Connection failed to orchestrator at ${orchestratorUrl}. Make sure the development server is running (npm run dev) first! Error: ${err.message}`));
+      },
+      redirect: "follow"
     });
-  });
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch project files. Status: ${res.status}`);
+    }
+
+    const data = await res.json() as any;
+    return data.files || [];
+  } catch (err: any) {
+    if (err.message.includes("Status:")) throw err;
+    throw new Error(`Connection failed to orchestrator at ${orchestratorUrl}. Error: ${err.message}`);
+  }
 }
 
 async function traceQALlmCall(
@@ -315,52 +295,33 @@ let fixAttempts = 0;
 const MAX_FIX_ATTEMPTS = 8;
 
 // Fetch current project status from the orchestrator
-export function fetchProjectStatus(projId: string = projectId): Promise<string> {
-  return new Promise((resolve) => {
-    const url = `${orchestratorUrl}/api/projects/${projId}/status`;
-    http.get(url, (res) => {
-      if (res.statusCode === 200) {
-        let rawData = "";
-        res.on("data", (chunk) => { rawData += chunk; });
-        res.on("end", () => {
-          try {
-            const data = JSON.parse(rawData);
-            resolve(data.status || "");
-          } catch (e) {
-            resolve("");
-          }
-        });
-      } else {
-        resolve("");
-      }
-    }).on("error", () => {
-      resolve("");
+export async function fetchProjectStatus(projId: string = projectId): Promise<string> {
+  const url = `${orchestratorUrl}/api/projects/${projId}/status`;
+  const internalSecret = process.env.ORCHESTRATOR_INTERNAL_SECRET || "valkyrie_internal_daemon_secret";
+  try {
+    const res = await fetch(url, {
+      headers: { "x-valkyrie-qa-key": internalSecret },
+      redirect: "follow"
     });
-  });
+    if (res.ok) {
+      const data = await res.json() as any;
+      return data.status || "";
+    }
+  } catch (e) {}
+  return "";
 }
 
 // Poll status helper
 export function pollForStatus(expectedStatus: string, projId: string = projectId): Promise<void> {
   return new Promise((resolve) => {
-    const interval = setInterval(() => {
-      const url = `${orchestratorUrl}/api/projects/${projId}/status`;
-      http.get(url, (res) => {
-        if (res.statusCode === 200) {
-          let rawData = "";
-          res.on("data", (chunk) => { rawData += chunk; });
-          res.on("end", () => {
-            try {
-              const data = JSON.parse(rawData);
-              if (data.status === expectedStatus) {
-                clearInterval(interval);
-                resolve();
-              } else {
-                console.log(`[QA Runner] Current project status: ${data.status}. Waiting for Developer Agent fixes...`);
-              }
-            } catch (e) {}
-          });
-        }
-      }).on("error", () => {});
+    const interval = setInterval(async () => {
+      const status = await fetchProjectStatus(projId);
+      if (status === expectedStatus) {
+        clearInterval(interval);
+        resolve();
+      } else {
+        console.log(`[QA Runner] Current project status: ${status}. Waiting for Developer Agent fixes...`);
+      }
     }, 5000);
   });
 }

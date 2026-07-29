@@ -16,6 +16,11 @@ describe("isValidFilePath", () => {
     expect(isValidFilePath("")).toBe(false);
     expect(isValidFilePath("- bullet point")).toBe(false);
   });
+
+  it("should reject bogus uppercase inline backtick references like pkg/types.UUID", () => {
+    expect(isValidFilePath("pkg/types.UUID")).toBe(false);
+    expect(isValidFilePath("models/User.SCHEMA")).toBe(false);
+  });
 });
 
 describe("stripCritiqueHeaders", () => {
