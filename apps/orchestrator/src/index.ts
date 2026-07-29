@@ -78,13 +78,20 @@ interface SystemSettings {
 
 function loadSettings(): SystemSettings {
   const defaultOllamaHost = process.env.OLLAMA_IP || process.env.OLLAMA_HOST || "http://localhost:11434";
+  let settings: SystemSettings = {
+    selectedModel: "qwen3-coder:latest",
+    selectedProvider: "ollama",
+    googleApiKey: process.env.GEMINI_API_KEY || "",
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
+    openaiApiKey: process.env.OPENAI_API_KEY || "",
+    ollamaIp: defaultOllamaHost
+  };
 
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const data = fs.readFileSync(SETTINGS_FILE, "utf-8");
       const parsed = JSON.parse(data);
-      // Migrate older settings format if needed
-      return {
+      settings = {
         selectedModel: parsed.selectedModel || "qwen3-coder:latest",
         selectedProvider: parsed.selectedProvider || "ollama",
         googleApiKey: process.env.GEMINI_API_KEY || parsed.googleApiKey || "",
@@ -96,14 +103,20 @@ function loadSettings(): SystemSettings {
   } catch (e) {
     console.error("Failed to load settings:", e);
   }
-  return {
-    selectedModel: "qwen3-coder:latest",
-    selectedProvider: "ollama",
-    googleApiKey: process.env.GEMINI_API_KEY || "",
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
-    openaiApiKey: process.env.OPENAI_API_KEY || "",
-    ollamaIp: defaultOllamaHost
-  };
+
+  // Automatically align model name if provider was switched without updating model string
+  const modelLower = settings.selectedModel.toLowerCase();
+  if (settings.selectedProvider === "anthropic" && (modelLower.includes("qwen") || modelLower.includes("llama") || modelLower.includes("deepseek") || modelLower.includes("gemini") || modelLower.includes("gpt"))) {
+    settings.selectedModel = "claude-sonnet-5";
+  } else if (settings.selectedProvider === "google" && (modelLower.includes("qwen") || modelLower.includes("llama") || modelLower.includes("deepseek") || modelLower.includes("claude") || modelLower.includes("gpt"))) {
+    settings.selectedModel = "gemini-3.5-flash";
+  } else if (settings.selectedProvider === "openai" && (modelLower.includes("qwen") || modelLower.includes("llama") || modelLower.includes("deepseek") || modelLower.includes("claude") || modelLower.includes("gemini"))) {
+    settings.selectedModel = "gpt-5.6-luna";
+  } else if (settings.selectedProvider === "ollama" && (modelLower.includes("claude") || modelLower.includes("gemini") || modelLower.includes("gpt"))) {
+    settings.selectedModel = "qwen3-coder:latest";
+  }
+
+  return settings;
 }
 
 function saveSettings(settings: SystemSettings) {
@@ -1503,18 +1516,16 @@ Please update and rewrite your specifications to apply all of these suggestions.
 
 // Helper to validate if a matched header path represents a valid file structure
 function isValidFilePath(filePath: string): boolean {
-  if (!filePath || filePath.trim() === "") return false;
-  if (filePath.includes(" ") || filePath.includes("`") || filePath.includes("*")) return false;
+  if (!filePath) return false;
+  const clean = filePath.trim().replace(/^[`'"]+|[`'"]+$/g, "").replace(/[:]$/, "");
+  if (!clean || clean.startsWith("#") || clean.startsWith("-") || clean.includes("..")) return false;
+  if (clean.includes(" ") || clean.includes("*") || clean.includes("<") || clean.includes(">")) return false;
   
-  const cleanPath = filePath.replace(/[:]$/, "");
-  const base = path.basename(cleanPath).toLowerCase();
-  
-  // Known configuration and special files
-  const knownFiles = new Set(["dockerfile", "makefile", "license", "go.mod", "go.sum", "package.json", "tsconfig.json"]);
+  const base = path.basename(clean).toLowerCase();
+  const knownFiles = new Set(["dockerfile", "makefile", "license", "go.mod", "go.sum", "package.json", "tsconfig.json", "requirements.txt", "readme.md"]);
   if (knownFiles.has(base)) return true;
 
-  const ext = path.extname(cleanPath);
-  // Ensure we have a valid file extension of 1 to 5 characters, excluding digits
+  const ext = path.extname(clean);
   if (ext && ext.length >= 2 && ext.length <= 6) {
     const extName = ext.substring(1);
     if (/^[a-zA-Z0-9]+$/.test(extName) && !/^\d+$/.test(extName)) {
@@ -1531,69 +1542,86 @@ function writeProjectFiles(projectId: string, language: string, content: string,
 
   const lines = content.split(/\r?\n/);
   let currentFile: string | null = null;
-  let inCodeBlock = false;
-  let codeBlockLines: string[] = [];
+  let currentFileLines: string[] = [];
   let parsedAny = false;
   let hasTestFile = false;
+
+  const saveCurrentFile = () => {
+    if (!currentFile) return;
+
+    let fileContent = currentFileLines.join("\n").trim();
+    if (fileContent.startsWith("```")) {
+      fileContent = fileContent.replace(/^```[a-zA-Z0-9_-]*\n?/, "");
+    }
+    if (fileContent.endsWith("```")) {
+      fileContent = fileContent.replace(/\n?```$/, "");
+    }
+    fileContent = fileContent.trim();
+
+    if (fileContent.length > 0) {
+      const filePath = path.join(dirPath, currentFile);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, fileContent + "\n");
+      console.log(`[ValkyrieParser] Wrote ${fileContent.length} bytes to: ${currentFile}`);
+      parsedAny = true;
+      if (currentFile.toLowerCase().includes("test")) {
+        hasTestFile = true;
+      }
+    }
+    currentFile = null;
+    currentFileLines = [];
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Check for file headers: e.g. "## `path/to/file`", "## File: path/to/file", etc.
-    let matchedPath: string | null = null;
-    const headerMatch = line.match(/^(?:#+\s*)+(?:File:?\s+|Path:?\s+)?`?([^`\s#]+)`?/i);
-    if (headerMatch) {
-      matchedPath = headerMatch[1];
+    // Match file header patterns: e.g. "## `main.go`", "### File: src/main.go", "## 1. `main.go`", "## path/to/file.py"
+    let matchedCandidate: string | null = null;
+
+    const backtickMatch = line.match(/`([^`\s]+)`/);
+    if (backtickMatch && isValidFilePath(backtickMatch[1])) {
+      matchedCandidate = backtickMatch[1];
+    } else {
+      const headerMatch = line.match(/^(?:#+\s*)+(?:\d+\.\s*)?(?:File:?\s+|Path:?\s+)?([^\s#:]+)/i);
+      if (headerMatch && isValidFilePath(headerMatch[1])) {
+        matchedCandidate = headerMatch[1];
+      }
     }
 
-    if (matchedPath) {
-      matchedPath = matchedPath.replace(/[:]$/, "");
-      if (isValidFilePath(matchedPath)) {
-        currentFile = matchedPath;
-        inCodeBlock = false;
-        codeBlockLines = [];
+    if (matchedCandidate) {
+      const cleanCandidate = matchedCandidate.trim().replace(/^[`'"]+|[`'"]+$/g, "").replace(/[:]$/, "");
+      if (isValidFilePath(cleanCandidate)) {
+        saveCurrentFile();
+        currentFile = cleanCandidate;
+        currentFileLines = [];
         continue;
       }
     }
 
     if (currentFile) {
-      if (line.trim().startsWith("```")) {
-        if (!inCodeBlock) {
-          inCodeBlock = true;
-          codeBlockLines = [];
-        } else {
-          // End of code block
-          inCodeBlock = false;
-          const filePath = path.join(dirPath, currentFile);
-          fs.mkdirSync(path.dirname(filePath), { recursive: true });
-          fs.writeFileSync(filePath, codeBlockLines.join("\n"));
-          console.log(`[ValkyrieParser] Wrote file: ${currentFile}`);
-          parsedAny = true;
-          
-          if (currentFile.toLowerCase().includes("test")) {
-            hasTestFile = true;
-          }
-          currentFile = null;
-        }
-        continue;
-      }
-
-      if (inCodeBlock) {
-        codeBlockLines.push(line);
-      }
+      currentFileLines.push(line);
     }
   }
 
-  // If no files were successfully parsed, write the whole chunk to the default file
+  // Save the last file in the loop
+  saveCurrentFile();
+
+  // If no files were parsed, write fallback main source file
   if (!parsedAny && allowFallback) {
     const filesMap: Record<string, string> = {
       typescript: "index.ts",
       python: "main.py",
-      go: "main.go"
+      go: "main.go",
+      java: "Main.java",
+      cpp: "main.cpp"
     };
-    const filename = filesMap[language.toLowerCase()] || "app.txt";
-    fs.writeFileSync(path.join(dirPath, filename), content);
-    console.log(`[ValkyrieParser] Wrote single file block: ${filename}`);
+    const filename = filesMap[language.toLowerCase()] || "main.go";
+    let cleanCode = content.trim();
+    if (cleanCode.startsWith("```")) {
+      cleanCode = cleanCode.replace(/^```[a-zA-Z0-9_-]*\n?/, "").replace(/\n?```$/, "").trim();
+    }
+    fs.writeFileSync(path.join(dirPath, filename), cleanCode + "\n");
+    console.log(`[ValkyrieParser] Wrote fallback source code file: ${filename}`);
   }
 
   // Write a basic dummy test suite if no specific test file was generated
