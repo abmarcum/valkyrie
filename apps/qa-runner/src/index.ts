@@ -362,7 +362,10 @@ async function executeQA(targetProjectId?: string) {
           console.log(`[QA Runner] Pipeline is in QA_LOOP but no test plan file was generated. Creating default test script...`);
           const isPython = files.some(f => f.name.endsWith(".py") || f.name === "requirements.txt");
           const defaultTestName = isPython ? "test.py" : "test.js";
-          testFile = { name: defaultTestName, content: "# Placeholder test suite" };
+          testFile = {
+            name: defaultTestName,
+            content: isPython ? "# Placeholder test suite" : "// Placeholder test suite"
+          };
           files.push(testFile);
           break;
         }
