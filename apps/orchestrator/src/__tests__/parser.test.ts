@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isValidFilePath, stripCritiqueHeaders } from "../index";
+import { isValidFilePath, stripCritiqueHeaders, extractJsonBlock } from "../index";
 
 describe("isValidFilePath", () => {
   it("should return true for valid code file paths", () => {
@@ -20,6 +20,15 @@ describe("isValidFilePath", () => {
   it("should reject bogus uppercase inline backtick references like pkg/types.UUID", () => {
     expect(isValidFilePath("pkg/types.UUID")).toBe(false);
     expect(isValidFilePath("models/User.SCHEMA")).toBe(false);
+  });
+});
+
+describe("extractJsonBlock", () => {
+  it("should extract JSON block wrapped in LLM commentary and markdown code blocks", () => {
+    const raw = "Here is the requested manifest:\n```json\n{\n  \"files\": [\"main.go\"]\n}\n```\nHope this helps!";
+    const extracted = extractJsonBlock(raw);
+    expect(extracted).toBe('{\n  "files": ["main.go"]\n}');
+    expect(JSON.parse(extracted)).toEqual({ files: ["main.go"] });
   });
 });
 

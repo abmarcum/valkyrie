@@ -1210,13 +1210,45 @@ Return JSON ONLY in the format:
 
         let targetFileList: Array<{ path: string; description: string }> = [];
         try {
-          const cleanedJson = manifestJsonText.replace(/```json/g, "").replace(/```/g, "").trim();
+          const cleanedJson = extractJsonBlock(manifestJsonText);
           const parsed = JSON.parse(cleanedJson);
-          if (Array.isArray(parsed.files)) {
-            targetFileList = parsed.files;
+          const rawList = Array.isArray(parsed)
+            ? parsed
+            : (Array.isArray(parsed.files) ? parsed.files : (Array.isArray(parsed.manifest) ? parsed.manifest : (Array.isArray(parsed.fileList) ? parsed.fileList : [])));
+
+          for (const item of rawList) {
+            if (typeof item === "string") {
+              if (isValidFilePath(item)) {
+                targetFileList.push({ path: item, description: `Module ${item}` });
+              }
+            } else if (item && typeof item === "object") {
+              const p = item.path || item.filename || item.file;
+              if (p && isValidFilePath(p)) {
+                targetFileList.push({ path: p, description: item.description || `Module ${p}` });
+              }
+            }
           }
         } catch (e) {
           console.warn("[ValkyrieSwarm] Manifest JSON parsing fallback triggered.");
+        }
+
+        // Architecture Spec Fallback: If JSON parsing yields 0 files, scan cleanArch line-by-line
+        if (targetFileList.length === 0 && cleanArch) {
+          const archLines = cleanArch.split(/\r?\n/);
+          const found = new Set<string>();
+          for (const line of archLines) {
+            const tokens = line.replace(/^[#\-\*\s]+/, "").split(/[\s,;:()]+/);
+            for (const token of tokens) {
+              const cleaned = token.replace(/^[`'"([<]+|[`'")\]>,:]+$/g, "");
+              if (isValidFilePath(cleaned) && !found.has(cleaned)) {
+                found.add(cleaned);
+                targetFileList.push({ path: cleaned, description: `Module ${cleaned}` });
+              }
+            }
+          }
+          if (targetFileList.length > 0) {
+            await addLog("Developer Agent", `Extracted ${targetFileList.length} module paths directly from architecture specification fallback.`, "info");
+          }
         }
 
         let codeText = "";
@@ -1668,6 +1700,26 @@ Please update and rewrite your specifications to apply all of these suggestions.
   return currentResponseText;
 }
 
+// Helper to extract JSON object or array substring from LLM response text
+export function extractJsonBlock(str: string): string {
+  if (!str) return "";
+  const cleaned = str.replace(/```json/gi, "").replace(/```/g, "").trim();
+
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    return cleaned.substring(firstBrace, lastBrace + 1);
+  }
+
+  const firstBracket = cleaned.indexOf("[");
+  const lastBracket = cleaned.lastIndexOf("]");
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    return cleaned.substring(firstBracket, lastBracket + 1);
+  }
+
+  return cleaned;
+}
+
 // Helper to validate if a matched header path represents a valid file structure
 export function isValidFilePath(filePath: string): boolean {
   if (!filePath) return false;
@@ -1738,16 +1790,21 @@ function writeProjectFiles(projectId: string, language: string, content: string,
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Match file header patterns: standalone backticks e.g. "`main.go`" or explicit headers "## File: src/main.go"
+    // Match file header patterns: standalone backticks e.g. "`main.go`" or tokenized markdown headers "## 1. pkg/doc.go - Shared library"
     let matchedCandidate: string | null = null;
 
     const standaloneBacktick = line.match(/^\s*`([^`\s]+)`\s*$/);
-    const headerMatch = line.match(/^(?:#+\s*)+(?:\d+\.\s*)?(?:File:?\s+|Path:?\s+|`)?([^\s#:`'"]+\.[a-zA-Z0-9]+)`?\s*$/i);
-
     if (standaloneBacktick && isValidFilePath(standaloneBacktick[1])) {
       matchedCandidate = standaloneBacktick[1];
-    } else if (headerMatch && isValidFilePath(headerMatch[1])) {
-      matchedCandidate = headerMatch[1];
+    } else if (/^#+/.test(line) || /^File:|^Path:/i.test(line)) {
+      const tokens = line.replace(/^#+/, "").replace(/^(?:File:?|Path:?)\s*/i, "").trim().split(/\s+/);
+      for (const token of tokens) {
+        const cleaned = token.replace(/^[`'"([<]+|[`'")\]>,:]+$/g, "");
+        if (isValidFilePath(cleaned)) {
+          matchedCandidate = cleaned;
+          break;
+        }
+      }
     }
 
     if (matchedCandidate) {
