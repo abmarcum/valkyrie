@@ -153,13 +153,16 @@ interface PersonaSpec {
   temperature?: number;
 }
 
-function getPersonaSystemPrompt(agentIdOrName: string): string {
+export function getPersonaSystemPrompt(agentIdOrName: string): string {
   try {
     const agentsPath = path.join(__dirname, "../../../personas/agents.json");
     if (fs.existsSync(agentsPath)) {
       const data = JSON.parse(fs.readFileSync(agentsPath, "utf-8"));
-      const persona = data.personas.find((p: PersonaSpec) =>
+      const persona = data.personas?.find((p: PersonaSpec) =>
         p.id === agentIdOrName || p.name.toLowerCase() === agentIdOrName.toLowerCase()
+      ) || data.agents?.find((a: any) =>
+        a.id.toLowerCase() === agentIdOrName.toLowerCase() ||
+        a.name.toLowerCase() === agentIdOrName.toLowerCase()
       );
 
       if (persona) {
@@ -186,7 +189,7 @@ function getPersonaSystemPrompt(agentIdOrName: string): string {
 }
 
 // Calculate cost based on provider rates
-function calculateLlmCost(promptTokens: number, completionTokens: number): { inputCost: number, outputCost: number, totalCost: number, inputRate: number, outputRate: number } {
+export function calculateLlmCost(promptTokens: number, completionTokens: number): { inputCost: number, outputCost: number, totalCost: number, inputRate: number, outputRate: number } {
   const settings = loadSettings();
   const provider = settings.selectedProvider || "google";
 
@@ -204,15 +207,15 @@ function calculateLlmCost(promptTokens: number, completionTokens: number): { inp
     outputRate = 0.0;
   }
 
-  const inputCost = Number(((promptTokens * inputRate) / 1000000).toFixed(6));
-  const outputCost = Number(((completionTokens * outputRate) / 1000000).toFixed(6));
-  const totalCost = Number((inputCost + outputCost).toFixed(6));
+  const inputCost = (promptTokens / 1000000) * inputRate;
+  const outputCost = (completionTokens / 1000000) * outputRate;
+  const totalCost = Number((inputCost + outputCost).toFixed(5));
 
   return { inputCost, outputCost, totalCost, inputRate, outputRate };
 }
 
 // Authentication and role authorization middlewares
-async function authMiddleware(req: FastifyRequest, reply: FastifyReply) {
+export async function authMiddleware(req: FastifyRequest, reply: FastifyReply) {
   const authHeader = req.headers.authorization;
   const queryToken = (req.query as any)?.token;
   let token = "";
@@ -236,7 +239,7 @@ async function authMiddleware(req: FastifyRequest, reply: FastifyReply) {
   }
 }
 
-function requireRole(roles: string[]) {
+export function requireRole(roles: string[]) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
     const user = (req as any).user;
     if (!user) {
@@ -567,7 +570,7 @@ const agentResponseCache = new Map<string, any>();
 const qaFixAttemptHistory = new Map<string, Array<{ attempt: number; errors: string[]; logs: string[] }>>();
 
 // Helper function to strip audit metadata headers from context prompt variables
-function stripCritiqueHeaders(text: string): string {
+export function stripCritiqueHeaders(text: string): string {
   if (!text) return "";
   return text.split("\n--- Cohere AI Quality Audit ---")[0].trim();
 }
@@ -1624,7 +1627,7 @@ Please update and rewrite your specifications to apply all of these suggestions.
 }
 
 // Helper to validate if a matched header path represents a valid file structure
-function isValidFilePath(filePath: string): boolean {
+export function isValidFilePath(filePath: string): boolean {
   if (!filePath) return false;
   const clean = filePath.trim().replace(/^[`'"]+|[`'"]+$/g, "").replace(/[:]$/, "");
   if (!clean || clean.startsWith("#") || clean.startsWith("-") || clean.includes("..")) return false;
@@ -2799,4 +2802,7 @@ const start = async () => {
     process.exit(1);
   }
 };
-start();
+
+if (process.env.NODE_ENV !== "test") {
+  start();
+}

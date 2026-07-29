@@ -7,7 +7,7 @@ import { exec } from "child_process";
 import { RunTree } from "langsmith";
 
 // Manual .env parser to avoid external dependency issues
-function loadDotenv(filePath: string) {
+export function loadDotenv(filePath: string) {
   try {
     if (fs.existsSync(filePath)) {
       const content = fs.readFileSync(filePath, "utf-8");
@@ -623,20 +623,22 @@ async function startGlobalQaDaemon() {
   }
 }
 
-if (!isMcp) {
-  if (explicitProjectId) {
-    console.log(`===============================================`);
-    console.log(` Valkyrie Local QA Runner CLI v1.0.0`);
-    console.log(` Target Project: ${explicitProjectId}`);
-    console.log(` Central Orchestrator: ${orchestratorUrl}`);
-    console.log(`===============================================`);
-    executeQA(explicitProjectId);
+if (process.env.NODE_ENV !== "test") {
+  if (!isMcp) {
+    if (explicitProjectId) {
+      console.log(`===============================================`);
+      console.log(` Valkyrie Local QA Runner CLI v1.0.0`);
+      console.log(` Target Project: ${explicitProjectId}`);
+      console.log(` Central Orchestrator: ${orchestratorUrl}`);
+      console.log(`===============================================`);
+      executeQA(explicitProjectId);
+    } else {
+      startGlobalQaDaemon();
+    }
   } else {
-    startGlobalQaDaemon();
+    // Start the lightweight MCP server inside the QA Runner package
+    import("./mcp").then((mcp) => {
+      mcp.startMcpServer();
+    });
   }
-} else {
-  // Start the lightweight MCP server inside the QA Runner package
-  import("./mcp").then((mcp) => {
-    mcp.startMcpServer();
-  });
 }
