@@ -527,14 +527,28 @@ async function callGeminiWithRetry(
   let activeModel = model;
 
   const cacheKey = `${provider}:${activeModel}:${systemPrompt}:${userPrompt}`;
-  if (useCache && agentResponseCache.has(cacheKey)) {
-    const cachedResponse = agentResponseCache.get(cacheKey);
-    await addLog(
-      agentName,
-      `[Cache Hit] Serving cached response for ${agentName} (avoided duplicate LLM call).`,
-      "success"
-    );
-    return cachedResponse;
+  if (useCache) {
+    let cachedResponse = agentResponseCache.get(cacheKey);
+    if (!cachedResponse) {
+      try {
+        const dbCache = await prisma.codeAnalysisCache.findFirst({
+          where: { fileHash: cacheKey }
+        });
+        if (dbCache && dbCache.analysisResult) {
+          cachedResponse = JSON.parse(dbCache.analysisResult);
+          agentResponseCache.set(cacheKey, cachedResponse);
+        }
+      } catch (e) {}
+    }
+
+    if (cachedResponse) {
+      await addLog(
+        agentName,
+        `[Cache Hit] Serving cached response for ${agentName} from database (avoided duplicate LLM call).`,
+        "success"
+      );
+      return cachedResponse;
+    }
   }
 
   let attempt = 0;
@@ -662,6 +676,21 @@ async function callGeminiWithRetry(
       };
 
       agentResponseCache.set(cacheKey, mapped);
+      try {
+        await prisma.codeAnalysisCache.upsert({
+          where: { fileHash: cacheKey },
+          create: {
+            projectId,
+            fileHash: cacheKey,
+            filePath: agentName,
+            analysisResult: JSON.stringify(mapped)
+          },
+          update: {
+            analysisResult: JSON.stringify(mapped)
+          }
+        });
+      } catch (e) {}
+
       return mapped;
     } catch (err: any) {
       if (err.message === "SWARM_CANCELLED" || cancelledRuns.has(projectId)) {
@@ -2404,10 +2433,11 @@ app.get("/api/admin/stats", { preHandler: [authMiddleware, requireRole(["admin"]
 
 const start = async () => {
   try {
+    await seedDatabase();
     await app.listen({ port: PORT, host: "0.0.0.0" });
     console.log(`Valkyrie Orchestrator running on http://0.0.0.0:${PORT}`);
-  } catch (err) {
-    console.error(err);
+  } catch (err: any) {
+    console.error("[FATAL STARTUP ERROR]:", err.message || err);
     process.exit(1);
   }
 };
