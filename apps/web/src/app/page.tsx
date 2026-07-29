@@ -32,7 +32,7 @@ export default function Home() {
 
         {/* Hero Title */}
         <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight max-w-4xl leading-[1.1] bg-gradient-to-r from-slate-100 via-slate-100 to-indigo-400 bg-clip-text text-transparent">
-          Orchestrate Agent Swarms to Build Enterprise SaaS
+          Orchestrate Agents to Build User Defined Applications
         </h1>
 
         {/* Hero Subtitle */}
