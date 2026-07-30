@@ -158,6 +158,33 @@ export default function RunPipeline() {
     },
   ]);
 
+  const [approving, setApproving] = useState(false);
+
+  const handleApprove = async () => {
+    const token = localStorage.getItem("token");
+    if (!token || !id) return;
+    setApproving(true);
+    try {
+      const res = await fetch(`${ORCHESTRATOR_URL}/api/projects/${id}/approve`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ useCache })
+      });
+      if (res.ok) {
+        setProjectData(prev => prev ? { ...prev, status: "GENERATING" } : null);
+      } else {
+        alert("Failed to approve planning specifications.");
+      }
+    } catch (e: any) {
+      alert("Error approving planning specifications: " + e.message);
+    } finally {
+      setApproving(false);
+    }
+  };
+
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
@@ -441,6 +468,47 @@ export default function RunPipeline() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Approval Action Card when status is AWAITING_APPROVAL */}
+          {projectData?.status === "AWAITING_APPROVAL" && (
+            <div className="bg-gradient-to-r from-violet-950/80 via-indigo-950/80 to-slate-900/90 border-2 border-violet-500/50 rounded-2xl p-6 shadow-2xl backdrop-blur-md space-y-4">
+              <div className="flex items-start space-x-4">
+                <div className="w-11 h-11 rounded-2xl bg-violet-500/20 border border-violet-400/30 flex items-center justify-center text-2xl shrink-0">
+                  📑
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-lg font-bold text-white">Planning Specifications Ready for Review</h3>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse">
+                      AWAITING APPROVAL
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    All planning specifications (<code className="text-violet-300 font-mono">docs/prd.md</code>, <code className="text-violet-300 font-mono">docs/architecture.md</code>, <code className="text-violet-300 font-mono">docs/database.md</code>, <code className="text-violet-300 font-mono">docs/ui_ux.md</code>) have been saved to disk. Review the files above and approve when ready to begin Developer Agent code implementation.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-4 pt-2 border-t border-violet-500/20">
+                <button
+                  onClick={handleApprove}
+                  disabled={isViewer || approving}
+                  className="px-6 py-3 rounded-xl bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white font-bold text-xs transition-all shadow-lg shadow-violet-500/30 active:scale-95 flex items-center space-x-2.5 cursor-pointer disabled:opacity-50"
+                >
+                  {approving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      <span>Starting Implementation...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-base">🚀</span>
+                      <span>Approve & Begin Code Implementation</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           )}
 

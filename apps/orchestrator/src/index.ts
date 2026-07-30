@@ -574,39 +574,45 @@ export function stripCritiqueHeaders(text: string): string {
   return text.split("\n--- Cohere AI Quality Audit ---")[0].trim();
 }
 
-// Helper function to query Cohere to audit/critique specifications
-async function callCohereToCritique(
+// Helper function to query Cohere to compress specifications into token-efficient context prompts
+async function compressWithCohere(
   cohere: CohereClient,
   content: string,
-  agentName: string
+  docType: string
 ): Promise<string> {
+  if (!content || content.length < 500) return content;
   try {
     let cohereModel = "command-a-plus-05-2026";
     let response;
+    const compressionPrompt = `You are a high-density Context & Prompt Compressor Agent in a multi-agent AI swarm.
+Synthesize and compress the following ${docType} document into a dense, token-efficient, technical specification summary for the Developer Agent.
+Preserve 100% of interface signatures, API endpoints, database schemas (Prisma/DDL), data structures, and core functional requirements.
+Strip out verbose narrative prose, introductory text, and conversational filler.
+
+Document Content:
+${content}`;
+
     try {
       response = await cohere.chat({
         model: cohereModel,
-        message: `You are the AI Quality Auditor in a multi-agent swarm.
-Review and critique the following generated document created by the ${agentName}.
-Check for any logical gaps, errors, or implementation problems, and suggest improvements. Keep your critique concise (maximum 3 bullet points).
-Document Content:
-${content}`
+        message: compressionPrompt
       });
     } catch (e: any) {
       response = await cohere.chat({
         model: "command-r-plus-08-2024",
-        message: `You are the AI Quality Auditor in a multi-agent swarm.
-Review and critique the following generated document created by the ${agentName}.
-Check for any logical gaps, errors, or implementation problems, and suggest improvements. Keep your critique concise (maximum 3 bullet points).
-Document Content:
-${content}`
+        message: compressionPrompt
       });
     }
-    return response.text || "";
+    const compressed = response.text || "";
+    return compressed.length > 50 ? compressed : content;
   } catch (err: any) {
-    console.error("[Cohere] Audit failed:", err.message);
-    return `[Cohere Audit Bypass] Unable to execute critique: ${err.message}`;
+    console.error("[Cohere] Compression failed:", err.message);
+    return content;
   }
+}
+
+async function callCohereToCritique(cohere: CohereClient, content: string, agentName: string): Promise<string> {
+  return compressWithCohere(cohere, content, agentName);
 }
 
 // Helper function to retry LLM API calls with exponential backoff if they fail
@@ -1236,368 +1242,26 @@ async function runAgentPipeline(
               await addLog("UI/UX Designer", `UI layouts & tokens drafted successfully:\n${resText.substring(0, 150)}...`, "success");
               writeDocFile(projectId, "ui_ux.md", resText);
             }
-            completedStatuses.add("UI_DESIGN");
+          completedStatuses.add("UI_DESIGN");
             return resText;
           })()
         ]);
 
-        // Phase 2: Modular DAG Code Generator
-        currentStatus = "GENERATING";
-        await addLog("Developer Agent", "Generating architectural file manifest for modular code synthesis...", "info");
+        // Phase 1 Complete: Pause pipeline and await user approval before code synthesis
+        currentStatus = "AWAITING_APPROVAL";
+        await addLog("System", "Planning specifications complete. PRD, Architecture layout, Database schema, and UI specs saved to disk. Pipeline paused. Awaiting user approval to proceed to code synthesis.", "info");
 
-        const cleanData = stripCritiqueHeaders(dataText);
-        const cleanUi = stripCritiqueHeaders(uiText);
-
-        const manifestPrompt = `Based on PRD: ${cleanPrd}, System Architecture: ${cleanArch}, DB Schema: ${cleanData}, and UI Spec: ${cleanUi}, output a JSON file manifest listing all the target source code files needed for this ${language} project.
-Return JSON ONLY in the format:
-{
-  "files": [
-    { "path": "relative/path/to/file.ext", "description": "Purpose of file" }
-  ]
-}`;
-
-        const manifestRes = await callGeminiWithRetry(
-          apiKey,
-          targetModel,
-          getPersonaSystemPrompt("Developer Agent"),
-          manifestPrompt,
-          addLog,
-          "Developer Agent",
+        await prisma.agentRun.updateMany({
+          where: { projectId },
+          data: {
+            status: "AWAITING_APPROVAL"
+          }
+        });
+        notifyClients(projectId, {
           projectId,
-          useCache
-        );
-
-        let manifestJsonText = "";
-        if (manifestRes.content && manifestRes.content[0] && "text" in manifestRes.content[0]) {
-          manifestJsonText = (manifestRes.content[0] as any).text;
-        }
-
-        const manifestInput = manifestRes.usage?.input_tokens;
-        const manifestOutput = manifestRes.usage?.output_tokens;
-        traceLlmCall("Developer Agent", manifestPrompt, manifestJsonText, manifestInput, manifestOutput);
-        await updateCost(manifestInput, manifestOutput);
-
-        let targetFileList: Array<{ path: string; description: string }> = [];
-        try {
-          const cleanedJson = extractJsonBlock(manifestJsonText);
-          const parsed = JSON.parse(cleanedJson);
-          const rawList = Array.isArray(parsed)
-            ? parsed
-            : (Array.isArray(parsed.files) ? parsed.files : (Array.isArray(parsed.manifest) ? parsed.manifest : (Array.isArray(parsed.fileList) ? parsed.fileList : [])));
-
-          for (const item of rawList) {
-            if (typeof item === "string") {
-              if (isValidFilePath(item)) {
-                targetFileList.push({ path: item, description: `Module ${item}` });
-              }
-            } else if (item && typeof item === "object") {
-              const p = item.path || item.filename || item.file;
-              if (p && isValidFilePath(p)) {
-                targetFileList.push({ path: p, description: item.description || `Module ${p}` });
-              }
-            }
-          }
-        } catch (e) {
-          console.warn("[ValkyrieSwarm] Manifest JSON parsing fallback triggered.");
-        }
-
-        // Architecture Spec Fallback: If JSON parsing yields 0 files, scan cleanArch line-by-line
-        if (targetFileList.length === 0 && cleanArch) {
-          const archLines = cleanArch.split(/\r?\n/);
-          const found = new Set<string>();
-          for (const line of archLines) {
-            const tokens = line.replace(/^[#\-\*\s├─└│+|]+/g, "").split(/[\s,;:()]+/);
-            for (const token of tokens) {
-              const cleaned = token.replace(/^[`'"([<]+|[`'")\]>,:]+$/g, "");
-              if (isValidFilePath(cleaned) && !found.has(cleaned)) {
-                found.add(cleaned);
-                targetFileList.push({ path: cleaned, description: `Module ${cleaned}` });
-              }
-            }
-          }
-          if (targetFileList.length > 0) {
-            await addLog("Developer Agent", `Extracted ${targetFileList.length} module paths directly from architecture specification fallback.`, "info");
-          }
-        }
-
-        // Universal Default Scaffolding: Ensure targetFileList is NEVER empty
-        if (targetFileList.length === 0) {
-          console.warn("[ValkyrieSwarm] All manifest parsing fallbacks yielded 0 files. Injecting default modular scaffold...");
-          const defaultsByLang: Record<string, Array<{ path: string; description: string }>> = {
-            go: [
-              { path: "go.mod", description: "Go module definition" },
-              { path: "main.go", description: "Main entry point" },
-              { path: "main_test.go", description: "Unit test suite" },
-              { path: "pkg/api/handler.go", description: "API request handlers" },
-              { path: "pkg/types/types.go", description: "Shared data models" }
-            ],
-            typescript: [
-              { path: "package.json", description: "Package manifest" },
-              { path: "src/index.ts", description: "Main application entry" },
-              { path: "src/__tests__/index.test.ts", description: "Unit test suite" },
-              { path: "src/types/index.ts", description: "Type definitions" }
-            ],
-            python: [
-              { path: "requirements.txt", description: "Python dependencies" },
-              { path: "main.py", description: "Application entry point" },
-              { path: "tests/test_main.py", description: "Unit test suite" },
-              { path: "app/models.py", description: "Data models" }
-            ]
-          };
-          targetFileList = defaultsByLang[language.toLowerCase()] || defaultsByLang.go;
-          await addLog("Developer Agent", `Injected ${targetFileList.length} standard scaffold modules to guarantee multi-file generation.`, "info");
-        }
-
-        let codeText = "";
-
-        if (targetFileList.length > 0) {
-          await addLog("Developer Agent", `Architectural manifest generated (${targetFileList.length} target modules). Synthesizing code modularly...`, "info");
-          for (const fileObj of targetFileList) {
-            if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-
-            // If Use Cache is TRUE, check if file already exists on disk and is non-empty
-            const diskFilePath = path.join(__dirname, `../../../generated/${projectId}/${fileObj.path}`);
-            if (useCache && fs.existsSync(diskFilePath)) {
-              try {
-                const stat = fs.statSync(diskFilePath);
-                if (stat.isFile() && stat.size > 0) {
-                  await addLog("Developer Agent", `[Cache Active] Skipping synthesis for existing module '${fileObj.path}' (${stat.size} bytes on disk).`, "info");
-                  const existingContent = fs.readFileSync(diskFilePath, "utf-8");
-                  codeText += `\n## ${fileObj.path}\n` + existingContent + "\n";
-                  continue;
-                }
-              } catch (e) { }
-            }
-
-            const filePrompt = `You are a Principal Software Engineer implementing '${fileObj.path}' (${fileObj.description}) for this ${language} project.
-Project Description: ${description}
-PRD Summary: ${cleanPrd.substring(0, 4000)}
-System Architecture: ${cleanArch.substring(0, 2000)}
-DB Schema: ${cleanData.substring(0, 2000)}
-UI Spec: ${cleanUi.substring(0, 2000)}
-
-SECURITY MANDATE:
-You must apply strict application security standards (OWASP Top 10 defense, parameterized queries, input validation/sanitization, secure credential handling, CORS/XSS protection, and error masking) directly in all synthesized code modules.
-
-CRITICAL REQUIREMENT:
-You must output the COMPLETE, working, production-ready source code for file '${fileObj.path}' without truncation or placeholders.
-Do NOT leave the response empty. Output clean code structured with path header:
-## ${fileObj.path}
-[full code content]`;
-
-            const fileRes = await callGeminiWithRetry(
-              apiKey,
-              targetModel,
-              getPersonaSystemPrompt("Developer Agent"),
-              filePrompt,
-              addLog,
-              "Developer Agent",
-              projectId,
-              useCache
-            );
-
-            let fileCode = "";
-            if (fileRes.content && fileRes.content[0] && "text" in fileRes.content[0]) {
-              fileCode = (fileRes.content[0] as any).text;
-            }
-            const fInput = fileRes.usage?.input_tokens;
-            const fOutput = fileRes.usage?.output_tokens;
-            traceLlmCall("Developer Agent", filePrompt, fileCode, fInput, fOutput);
-            await updateCost(fInput, fOutput);
-
-            let cleanModuleCode = fileCode.trim();
-            if (cleanModuleCode.startsWith("```")) {
-              cleanModuleCode = cleanModuleCode.replace(/^```[a-zA-Z0-9_-]*\n?/, "").replace(/\n?```$/, "").trim();
-            }
-            const moduleFilePath = path.join(projectDirPath, fileObj.path);
-            fs.mkdirSync(path.dirname(moduleFilePath), { recursive: true });
-            fs.writeFileSync(moduleFilePath, cleanModuleCode + "\n");
-            console.log(`[ValkyrieParser] Wrote ${cleanModuleCode.length} bytes directly to module: ${fileObj.path}`);
-            codeText += `\n\n## ${fileObj.path}\n${cleanModuleCode}`;
-            writeProjectFiles(projectId, language, fileCode, false);
-          }
-        } else {
-          // Single pass fallback if manifest JSON is unavailable
-          const devPrompt = `Generate the complete source code files for: ${description}.\nPRD: ${cleanPrd}\nArchitecture: ${cleanArch}\nDB Schema: ${cleanData}\nUI Spec: ${cleanUi}\nSECURITY MANDATE: Implement OWASP Top 10 protection, parameterized queries, input validation, secure credential handling, and error masking.\nOutput clean code structured with path headers (e.g. ## path/to/file).`;
-          const codeResponse = await callGeminiWithRetry(
-            apiKey,
-            targetModel,
-            getPersonaSystemPrompt("Developer Agent"),
-            devPrompt,
-            addLog,
-            "Developer Agent",
-            projectId,
-            useCache
-          );
-
-          if (codeResponse.content && codeResponse.content[0] && "text" in codeResponse.content[0]) {
-            codeText = (codeResponse.content[0] as any).text;
-          }
-          const codeInput = codeResponse.usage?.input_tokens;
-          const codeOutput = codeResponse.usage?.output_tokens;
-          traceLlmCall("Developer Agent", devPrompt, codeText, codeInput, codeOutput);
-          await updateCost(codeInput, codeOutput);
-          writeProjectFiles(projectId, language, codeText, false);
-        }
-
-        // Live Security Architect Audit (Disabled by configuration; code preserved for reference)
-        const enableSecurityArchitect = false;
-        if (enableSecurityArchitect) {
-          currentStatus = "AUDITING";
-          await addLog("Security Architect", "Auditing application code for security vulnerabilities, secrets leakage, and compliance...", "info");
-
-          codeText = await validateAndReviseResponse(
-            apiKey || "",
-            targetModel,
-            "Developer Agent",
-            getPersonaSystemPrompt("Developer Agent"),
-            "Ensure code contains no security vulnerabilities.",
-            codeText,
-            "Security Architect",
-            getPersonaSystemPrompt("Security Architect"),
-            "Validate the code does not contain any security vulnerabilities, hardcoded secrets, SQL injections, XSS vulnerabilities, insecure authentication pathways, or directory traversals. Review every single code block carefully.",
-            projectId,
-            addLog,
-            useCache,
-            updateCost
-          );
-          completedStatuses.add("AUDITING");
-        } else {
-          await addLog("Developer Agent", "Security considerations embedded directly into code synthesis by Developer Agent (Security Architect loop bypassed).", "info");
-          completedStatuses.add("AUDITING");
-        }
-
-        // Write project code files
-        writeProjectFiles(projectId, language, codeText || "// Generated code", false);
-        await addLog("Developer Agent", "Code synthesized with security practices embedded. Files saved to disk.", "success");
-        completedStatuses.add("GENERATING");
-
-        // Submit the code to GitHub immediately after Developer Agent synthesis has completed
-        await addLog("Developer Agent", "Code synthesis complete. Committing and pushing codebase to GitHub...", "info");
-        const initialGitResult = await pushToGithub(projectId, vcsRepo || "");
-        await addLog("Developer Agent", `Code pushed to GitHub: ${initialGitResult.message}`, initialGitResult.success ? "success" : "error");
-
-        // Live Tech Writer Agent call
-        currentStatus = "DOCUMENTING";
-        await addLog("Tech Writer", "Generating project documentation manuals and API references...", "info");
-        const writerPrompt = `Based on the following application description: ${description} and the generated code modules:
-${codeText}
-
-Write high-quality technical documentation for the project. Output:
-1. A clear README.md detailing the architecture, setup requirements, installation, and execution instructions.
-2. A docs/api.md or API.md detailing endpoints, payload schemas, request/response models, and configurations.
-
-Structure each document with path headers (e.g. ## README.md or ## docs/api.md) so the file writer can save them to disk.`;
-
-        const writerResponse = await callGeminiWithRetry(
-          apiKey,
-          targetModel,
-          getPersonaSystemPrompt("Tech Writer"),
-          writerPrompt,
-          addLog,
-          "Tech Writer",
-          projectId,
-          useCache
-        );
-
-        let docText = "";
-        if (writerResponse.content && writerResponse.content[0] && "text" in writerResponse.content[0]) {
-          docText = (writerResponse.content[0] as any).text;
-        }
-
-        const writerInput = writerResponse.usage?.input_tokens;
-        const writerOutput = writerResponse.usage?.output_tokens;
-        traceLlmCall("Tech Writer", writerPrompt, docText, writerInput, writerOutput);
-        await updateCost(writerInput, writerOutput);
-
-        if (cohereClient) {
-          await addLog("Tech Writer", "Invoking Cohere to refine and critique generated documentation...", "info");
-          const refinement = await callCohereToCritique(cohereClient, docText, "Tech Writer");
-          docText += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
-        }
-
-        if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-
-        // PM Validation loop for Tech Writer Agent
-        docText = await validateAndReviseResponse(
-          apiKey || "",
-          targetModel,
-          "Tech Writer",
-          getPersonaSystemPrompt("Tech Writer"),
-          writerPrompt,
-          docText,
-          "Product Manager",
-          getPersonaSystemPrompt("Product Manager"),
-          prd,
-          projectId,
-          addLog,
-          useCache,
-          updateCost
-        );
-
-        // Write documentation files into generated folder
-        writeProjectFiles(projectId, language, docText || "# Documentation", false);
-
-        // Safeguard: Ensure root README.md exists before pushing to Git
-        const readmePath = path.join(__dirname, `../../../generated/${projectId}/README.md`);
-        if (!fs.existsSync(readmePath)) {
-          const defaultReadme = docText && docText.trim().length > 0
-            ? docText.trim()
-            : `# ${projectName || 'Valkyrie Project'}\n\nGenerated by Valkyrie Multi-Agent Swarm.`;
-          fs.writeFileSync(readmePath, defaultReadme + "\n");
-          console.log(`[ValkyrieDoc] Root README.md guaranteed on disk.`);
-        }
-
-        await addLog("Tech Writer", "Documentation generated successfully. README and API files saved to disk.", "success");
-
-        // Phase 4: Architectural Completeness Gate
-        if (targetFileList.length > 0) {
-          const missingFiles = verifyProjectCompleteness(projectId, targetFileList);
-          if (missingFiles.length > 0) {
-            await addLog("Developer Agent", `Completeness gate detected ${missingFiles.length} missing/empty manifest modules. Executing targeted recovery generation...`, "warning");
-            for (const missingPath of missingFiles) {
-              if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-              const recoveryPrompt = `Generate the exact code contents for missing manifest file '${missingPath}'.
-Language: ${language}
-Description: ${description}
-PRD: ${cleanPrd}
-Architecture: ${cleanArch}
-
-Output clean code structured with path header:
-## ${missingPath}
-[code content]`;
-
-              const recoveryRes = await callGeminiWithRetry(
-                apiKey,
-                targetModel,
-                getPersonaSystemPrompt("Developer Agent"),
-                recoveryPrompt,
-                addLog,
-                "Developer Agent",
-                projectId,
-                useCache
-              );
-
-              let recCode = "";
-              if (recoveryRes.content && recoveryRes.content[0] && "text" in recoveryRes.content[0]) {
-                recCode = (recoveryRes.content[0] as any).text;
-              }
-              const rInput = recoveryRes.usage?.input_tokens;
-              const rOutput = recoveryRes.usage?.output_tokens;
-              await updateCost(rInput, rOutput);
-
-              writeProjectFiles(projectId, language, recCode, false);
-            }
-            await addLog("Developer Agent", "Targeted recovery generation completed. All manifest modules verified on disk.", "success");
-          }
-        }
-
-        // Git Commit & GitHub push integration
-        await addLog("Tech Writer", "Initializing Git workspace & committing code + documentation files to repository...", "info");
-        const gitResult = await pushToGithub(projectId, vcsRepo || "");
-        await addLog("Tech Writer", gitResult.message, gitResult.success ? "success" : "error");
-
-        completedStatuses.add("DOCUMENTING");
+          status: "AWAITING_APPROVAL"
+        });
+        return;
 
       } catch (err: any) {
         if (err.message === "SWARM_CANCELLED") throw err;
@@ -1618,20 +1282,6 @@ Output clean code structured with path header:
       notifyClients(projectId, { projectId, status: "FAILED" });
       return;
     }
-
-    if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-
-    // Set QA runner active status
-    currentStatus = "QA_LOOP";
-    await addLog("QA Engineer (Runner)", "Scaffold files prepared. Awaiting local QA runner testing...", "info");
-
-    await prisma.agentRun.updateMany({
-      where: { projectId },
-      data: {
-        status: "QA_LOOP"
-      }
-    });
-    notifyClients(projectId, { projectId, status: "QA_LOOP" });
   } catch (err: any) {
     if (err.message === "SWARM_CANCELLED") {
       await addLog("System", "Swarm pipeline execution cancelled by user.", "warning");
@@ -1643,9 +1293,341 @@ Output clean code structured with path header:
           status: "CANCELLED"
         }
       });
+      notifyClients(projectId, { projectId, status: "CANCELLED" });
+    } else {
+      console.error("[ValkyrieSwarm] Error running pipeline:", err);
+      await prisma.agentRun.updateMany({
+        where: { projectId },
+        data: {
+          status: "FAILED"
+        }
+      });
+      notifyClients(projectId, { projectId, status: "FAILED" });
+    }
+  }
+}
+
+// Asynchronous helper function to resume Developer Agent code implementation after user approval
+async function runDeveloperSynthesis(projectId: string, useCache: boolean = true) {
+  let updatedLogs: any[] = [];
+  const addLog = async (agent: string, message: string, type: "info" | "success" | "warning" | "error" = "info") => {
+    const entry = { timestamp: new Date().toLocaleTimeString(), agent, message, type };
+    updatedLogs.push(entry);
+    await prisma.agentRun.updateMany({
+      where: { projectId },
+      data: { logs: JSON.stringify(updatedLogs), status: "GENERATING" }
+    });
+    notifyClients(projectId, { projectId, status: "GENERATING", logs: updatedLogs });
+  };
+
+  try {
+    const run = await prisma.agentRun.findUnique({
+      where: { id: projectId },
+      include: { project: true }
+    });
+    if (!run || !run.project) return;
+
+    try {
+      updatedLogs = JSON.parse((run.logs as string) || "[]");
+    } catch (e) { }
+
+    const settings = loadSettings();
+    const targetModel = settings.selectedModel || "gemini-3.5-flash";
+    const apiKey = settings.googleApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
+    const cohereApiKey = process.env.COHERE_API_KEY;
+    const cohereClient = cohereApiKey ? new CohereClient({ token: cohereApiKey }) : null;
+    const language = run.project.programmingLanguage;
+    const description = run.project.description || "";
+    const vcsRepo = run.project.vcsRepoUrl;
+
+    const projectDirPath = path.join(__dirname, `../../../generated/${projectId}`);
+
+    const readDoc = (filename: string): string => {
+      const p = path.join(projectDirPath, `docs/${filename}`);
+      return fs.existsSync(p) ? fs.readFileSync(p, "utf-8") : "";
+    };
+
+    const prd = readDoc("prd.md");
+    const archText = readDoc("architecture.md");
+    const dataText = readDoc("database.md");
+    const uiText = readDoc("ui_ux.md");
+
+    const cleanPrd = stripCritiqueHeaders(prd);
+    const cleanArch = stripCritiqueHeaders(archText);
+    const cleanData = stripCritiqueHeaders(dataText);
+    const cleanUi = stripCritiqueHeaders(uiText);
+
+    let accumPromptTokens = 0;
+    let accumCompletionTokens = 0;
+    const updateCost = async (pTokens?: number, cTokens?: number) => {
+      if (pTokens) accumPromptTokens += pTokens;
+      if (cTokens) accumCompletionTokens += cTokens;
+      const costUSD = calculateLlmCost(accumPromptTokens, accumCompletionTokens).totalCost;
+      await prisma.agentRun.updateMany({
+        where: { projectId },
+        data: {
+          costInfo: JSON.stringify({
+            promptTokens: accumPromptTokens,
+            completionTokens: accumCompletionTokens,
+            costUSD
+          })
+        }
+      });
+    };
+
+    await addLog("System", "User approval received. Resuming Developer Agent code implementation phase...", "success");
+
+    let compressedPrd = cleanPrd;
+    let compressedArch = cleanArch;
+    let compressedData = cleanData;
+    let compressedUi = cleanUi;
+
+    if (cohereClient) {
+      await addLog("Developer Agent", "Invoking Cohere (command-a-plus-05-2026) to compress specifications into high-density prompts...", "info");
+      [compressedPrd, compressedArch, compressedData, compressedUi] = await Promise.all([
+        compressWithCohere(cohereClient, cleanPrd, "Product Requirements Document (PRD)"),
+        compressWithCohere(cohereClient, cleanArch, "Software Architecture Layout"),
+        compressWithCohere(cohereClient, cleanData, "Database Schema Spec"),
+        compressWithCohere(cohereClient, cleanUi, "UI/UX Design Spec")
+      ]);
+      await addLog(
+        "Developer Agent",
+        `Cohere Context Compression complete (PRD: ${cleanPrd.length} -> ${compressedPrd.length} chars, Arch: ${cleanArch.length} -> ${compressedArch.length} chars).`,
+        "success"
+      );
+    }
+
+    const manifestFilePath = path.join(projectDirPath, "docs/manifest.json");
+    let targetFileList: Array<{ path: string; description: string }> = [];
+
+    if (useCache && fs.existsSync(manifestFilePath)) {
+      try {
+        const cachedContent = fs.readFileSync(manifestFilePath, "utf-8");
+        const parsed = JSON.parse(cachedContent);
+        if (Array.isArray(parsed.files) && parsed.files.length > 0) {
+          targetFileList = parsed.files;
+          await addLog("Developer Agent", `[Cache Active] Loaded ${targetFileList.length} architectural modules directly from cached docs/manifest.json.`, "info");
+        }
+      } catch (e) { }
+    }
+
+    if (targetFileList.length === 0) {
+      const manifestPrompt = `Based on PRD: ${compressedPrd}, System Architecture: ${compressedArch}, DB Schema: ${compressedData}, and UI Spec: ${compressedUi}, output a JSON file manifest listing all the target source code files needed for this ${language} project.
+Return JSON ONLY in the format:
+{
+  "files": [
+    { "path": "relative/path/to/file.ext", "description": "Purpose of file" }
+  ]
+}`;
+
+      const manifestRes = await callGeminiWithRetry(
+        apiKey,
+        targetModel,
+        getPersonaSystemPrompt("Developer Agent"),
+        manifestPrompt,
+        addLog,
+        "Developer Agent",
+        projectId,
+        useCache
+      );
+
+      let manifestJsonText = "";
+      if (manifestRes.content && manifestRes.content[0] && "text" in manifestRes.content[0]) {
+        manifestJsonText = (manifestRes.content[0] as any).text;
+      }
+
+      const manifestInput = manifestRes.usage?.input_tokens;
+      const manifestOutput = manifestRes.usage?.output_tokens;
+      traceLlmCall("Developer Agent", manifestPrompt, manifestJsonText, manifestInput, manifestOutput);
+      await updateCost(manifestInput, manifestOutput);
+
+      try {
+        const cleanedJson = extractJsonBlock(manifestJsonText);
+        const parsed = JSON.parse(cleanedJson);
+        const rawList = Array.isArray(parsed)
+          ? parsed
+          : (Array.isArray(parsed.files) ? parsed.files : (Array.isArray(parsed.manifest) ? parsed.manifest : (Array.isArray(parsed.fileList) ? parsed.fileList : [])));
+
+        for (const item of rawList) {
+          if (typeof item === "string") {
+            if (isValidFilePath(item)) {
+              targetFileList.push({ path: item, description: `Module ${item}` });
+            }
+          } else if (item && typeof item === "object") {
+            const p = item.path || item.filename || item.file;
+            if (p && isValidFilePath(p)) {
+              targetFileList.push({ path: p, description: item.description || `Module ${p}` });
+            }
+          }
+        }
+      } catch (e) { }
+
+      if (targetFileList.length > 0) {
+        writeDocFile(projectId, "manifest.json", JSON.stringify({ files: targetFileList }, null, 2));
+      }
+    }
+
+    if (targetFileList.length === 0 && cleanArch) {
+      const archLines = cleanArch.split(/\r?\n/);
+      const found = new Set<string>();
+      for (const line of archLines) {
+        const tokens = line.replace(/^[#\-\*\s├─└│+|]+/g, "").split(/[\s,;:()]+/);
+        for (const token of tokens) {
+          const cleaned = token.replace(/^[`'"([<]+|[`'")\]>,:]+$/g, "");
+          if (isValidFilePath(cleaned) && !found.has(cleaned)) {
+            found.add(cleaned);
+            targetFileList.push({ path: cleaned, description: `Module ${cleaned}` });
+          }
+        }
+      }
+    }
+
+    if (targetFileList.length === 0) {
+      const defaultsByLang: Record<string, Array<{ path: string; description: string }>> = {
+        go: [
+          { path: "go.mod", description: "Go module definition" },
+          { path: "main.go", description: "Main entry point" },
+          { path: "main_test.go", description: "Unit test suite" },
+          { path: "pkg/api/handler.go", description: "API request handlers" },
+          { path: "pkg/types/types.go", description: "Shared data models" }
+        ],
+        typescript: [
+          { path: "package.json", description: "Package manifest" },
+          { path: "src/index.ts", description: "Main application entry" },
+          { path: "src/__tests__/index.test.ts", description: "Unit test suite" },
+          { path: "src/types/index.ts", description: "Type definitions" }
+        ],
+        python: [
+          { path: "requirements.txt", description: "Python dependencies" },
+          { path: "main.py", description: "Application entry point" },
+          { path: "tests/test_main.py", description: "Unit test suite" },
+          { path: "app/models.py", description: "Data models" }
+        ]
+      };
+      targetFileList = defaultsByLang[language.toLowerCase()] || defaultsByLang.go;
+    }
+
+    let codeText = "";
+    if (targetFileList.length > 0) {
+      await addLog("Developer Agent", `Architectural manifest generated (${targetFileList.length} target modules). Synthesizing code modularly...`, "info");
+      for (const fileObj of targetFileList) {
+        if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
+
+        const diskFilePath = path.join(projectDirPath, fileObj.path);
+        if (useCache && fs.existsSync(diskFilePath)) {
+          try {
+            const stat = fs.statSync(diskFilePath);
+            if (stat.isFile() && stat.size > 0) {
+              await addLog("Developer Agent", `[Cache Active] Skipping synthesis for existing module '${fileObj.path}' (${stat.size} bytes on disk).`, "info");
+              const existingContent = fs.readFileSync(diskFilePath, "utf-8");
+              codeText += `\n## ${fileObj.path}\n` + existingContent + "\n";
+              continue;
+            }
+          } catch (e) { }
+        }
+
+        const filePrompt = `You are a Principal Software Engineer implementing '${fileObj.path}' (${fileObj.description}) for this ${language} project.
+Project Description: ${description}
+PRD Summary: ${compressedPrd.substring(0, 4000)}
+System Architecture: ${compressedArch.substring(0, 2000)}
+DB Schema: ${compressedData.substring(0, 2000)}
+UI Spec: ${compressedUi.substring(0, 2000)}
+
+SECURITY MANDATE:
+You must apply strict application security standards (OWASP Top 10 defense, parameterized queries, input validation/sanitization, secure credential handling, CORS/XSS protection, and error masking) directly in all synthesized code modules.
+
+CRITICAL REQUIREMENT:
+You must output the COMPLETE, working, production-ready source code for file '${fileObj.path}' without truncation or placeholders.
+Do NOT leave the response empty. Output clean code structured with path header:
+## ${fileObj.path}
+[full code content]`;
+
+        const fileRes = await callGeminiWithRetry(
+          apiKey,
+          targetModel,
+          getPersonaSystemPrompt("Developer Agent"),
+          filePrompt,
+          addLog,
+          "Developer Agent",
+          projectId,
+          useCache
+        );
+
+        let fileCode = "";
+        if (fileRes.content && fileRes.content[0] && "text" in fileRes.content[0]) {
+          fileCode = (fileRes.content[0] as any).text;
+        }
+        const fInput = fileRes.usage?.input_tokens;
+        const fOutput = fileRes.usage?.output_tokens;
+        traceLlmCall("Developer Agent", filePrompt, fileCode, fInput, fOutput);
+        await updateCost(fInput, fOutput);
+
+        let cleanModuleCode = fileCode.trim();
+        if (cleanModuleCode.startsWith("```")) {
+          cleanModuleCode = cleanModuleCode.replace(/^```[a-zA-Z0-9_-]*\n?/, "").replace(/\n?```$/, "").trim();
+        }
+        const moduleFilePath = path.join(projectDirPath, fileObj.path);
+        fs.mkdirSync(path.dirname(moduleFilePath), { recursive: true });
+        fs.writeFileSync(moduleFilePath, cleanModuleCode + "\n");
+        codeText += `\n\n## ${fileObj.path}\n${cleanModuleCode}`;
+        writeProjectFiles(projectId, language, fileCode, false);
+      }
+    }
+
+    writeProjectFiles(projectId, language, codeText || "// Generated code", false);
+    await addLog("Developer Agent", "Code synthesized with security practices embedded. Files saved to disk.", "success");
+
+    await addLog("Developer Agent", "Code synthesis complete. Committing and pushing codebase to GitHub...", "info");
+    const initialGitResult = await pushToGithub(projectId, vcsRepo || "");
+    await addLog("Developer Agent", `Code pushed to GitHub: ${initialGitResult.message}`, initialGitResult.success ? "success" : "error");
+
+    // Tech Writer
+    await addLog("Tech Writer", "Generating project documentation manuals and API references...", "info");
+    const writerPrompt = `Based on the following application description: ${description} and the generated code modules:\n${codeText}\n\nWrite high-quality technical documentation for the project. Output README.md and docs/api.md.`;
+
+    const writerResponse = await callGeminiWithRetry(
+      apiKey,
+      targetModel,
+      getPersonaSystemPrompt("Tech Writer"),
+      writerPrompt,
+      addLog,
+      "Tech Writer",
+      projectId,
+      useCache
+    );
+
+    let docText = "";
+    if (writerResponse.content && writerResponse.content[0] && "text" in writerResponse.content[0]) {
+      docText = (writerResponse.content[0] as any).text;
+    }
+    const writerInput = writerResponse.usage?.input_tokens;
+    const writerOutput = writerResponse.usage?.output_tokens;
+    traceLlmCall("Tech Writer", writerPrompt, docText, writerInput, writerOutput);
+    await updateCost(writerInput, writerOutput);
+
+    writeProjectFiles(projectId, language, docText || "# Documentation", false);
+    await addLog("Tech Writer", "Documentation generated successfully. README and API files saved to disk.", "success");
+
+    // Trigger QA runner daemon
+    await addLog("QA Engineer (Runner)", "Scaffold files prepared. Awaiting local QA runner testing...", "info");
+    await prisma.agentRun.updateMany({
+      where: { projectId },
+      data: { status: "QA_LOOP" }
+    });
+    notifyClients(projectId, { projectId, status: "QA_LOOP" });
+
+  } catch (err: any) {
+    if (err.message === "SWARM_CANCELLED") {
+      await addLog("System", "Swarm pipeline execution cancelled by user.", "warning");
+      cancelledRuns.delete(projectId);
+      await prisma.agentRun.updateMany({
+        where: { projectId },
+        data: { status: "CANCELLED" }
+      });
+      notifyClients(projectId, { projectId, status: "CANCELLED" });
       return;
     }
-    await addLog("System", `[FATAL] Swarm execution failed: ${err.message}`, "error");
+    await addLog("System", `[FATAL] Code synthesis failed: ${err.message}`, "error");
     await prisma.agentRun.updateMany({
       where: { projectId },
       data: { status: "FAILED" }
@@ -2306,6 +2288,40 @@ app.post("/api/projects/:id/cancel", { preHandler: [authMiddleware, requireRole(
     });
 
     return reply.send({ success: true, message: "Pipeline cancellation signal sent." });
+  } catch (err: any) {
+    return reply.status(500).send({ error: err.message });
+  }
+});
+
+// REST: Approve planning specifications and trigger Developer Agent code synthesis
+app.post("/api/projects/:id/approve", { preHandler: [authMiddleware, requireRole(["admin", "user"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  const projectId = (req.params as any).id;
+  const user = (req as any).user;
+  const useCache = (req.body as any)?.useCache !== false;
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) {
+    return reply.status(400).send({ error: "Invalid project ID format." });
+  }
+
+  try {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId }
+    });
+
+    if (!project || (user.role !== "admin" && project.tenantId !== user.tenantId)) {
+      return reply.status(404).send({ error: "Project not found." });
+    }
+
+    await prisma.agentRun.updateMany({
+      where: { projectId },
+      data: { status: "GENERATING" }
+    });
+    notifyClients(projectId, { projectId, status: "GENERATING" });
+
+    // Trigger Developer Agent code synthesis asynchronously
+    runDeveloperSynthesis(projectId, useCache);
+
+    return reply.send({ success: true, message: "Planning specifications approved. Developer Agent code synthesis initiated." });
   } catch (err: any) {
     return reply.status(500).send({ error: err.message });
   }
