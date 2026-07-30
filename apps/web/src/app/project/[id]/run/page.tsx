@@ -22,11 +22,25 @@ interface UserSession {
   tenantId: string;
 }
 
+interface ProjectData {
+  projectId: string;
+  projectName: string;
+  description: string;
+  language: string;
+  cloud: string;
+  vcsRepoUrl: string | null;
+  createdAt: string;
+  status: string;
+  files: Array<{ path: string; size: number }>;
+}
+
 export default function RunPipeline() {
   const router = useRouter();
   const { id } = useParams();
   const [useCache, setUseCache] = useState(true);
   const [user, setUser] = useState<UserSession | null>(null);
+  const [projectData, setProjectData] = useState<ProjectData | null>(null);
+  const [showAllFiles, setShowAllFiles] = useState(false);
   
   const logsEndRef = useRef<HTMLDivElement | null>(null);
   const [copied, setCopied] = useState(false);
@@ -175,6 +189,17 @@ export default function RunPipeline() {
         });
         if (res.ok) {
           const data = await res.json();
+          setProjectData({
+            projectId: data.projectId,
+            projectName: data.projectName,
+            description: data.description || "",
+            language: data.language || "",
+            cloud: data.cloud || "",
+            vcsRepoUrl: data.vcsRepoUrl || null,
+            createdAt: data.createdAt || "",
+            status: data.status || "",
+            files: data.files || []
+          });
           if (data.logs && Array.isArray(data.logs) && data.logs.length > 0) {
             setLogs(data.logs);
           }
@@ -338,11 +363,92 @@ export default function RunPipeline() {
           </div>
         </section>
 
-        {/* Right Side: SSE Agent Logs */}
-        <section className="lg:col-span-2 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm shadow-xl flex flex-col min-h-[500px]">
-          <div className="flex flex-wrap justify-between items-center mb-6 gap-3">
-            <div>
-              <h2 className="text-xl font-bold text-slate-100">Live Agent Debates & Output</h2>
+        {/* Right Side: Project Overview & SSE Agent Logs */}
+        <section className="lg:col-span-2 space-y-6">
+          {/* Project Specification & Repository Banner */}
+          {projectData && (
+            <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm shadow-xl space-y-5">
+              <div className="flex flex-wrap justify-between items-start gap-4 pb-4 border-b border-slate-800">
+                <div>
+                  <div className="flex items-center space-x-3">
+                    <h2 className="text-xl font-bold text-slate-100">{projectData.projectName}</h2>
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                      {projectData.language} • {projectData.cloud}
+                    </span>
+                  </div>
+                  {projectData.createdAt && (
+                    <p className="text-xs text-slate-400 mt-1">
+                      📅 Created: <span className="text-slate-300 font-mono">{new Date(projectData.createdAt).toLocaleString()}</span>
+                    </p>
+                  )}
+                </div>
+
+                {projectData.vcsRepoUrl ? (
+                  <a
+                    href={projectData.vcsRepoUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition-all shadow-sm active:scale-95 cursor-pointer"
+                  >
+                    <svg className="w-4 h-4 fill-current text-slate-300" viewBox="0 0 24 24">
+                      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+                    </svg>
+                    <span>View GitHub Repository</span>
+                  </a>
+                ) : (
+                  <span className="text-xs text-slate-500 bg-slate-950/60 px-3 py-1.5 rounded-lg border border-slate-800">
+                    No VCS Repo Linked
+                  </span>
+                )}
+              </div>
+
+              {/* Initial Prompt */}
+              {projectData.description && (
+                <div className="space-y-2">
+                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Initial Project Prompt</h3>
+                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 text-xs text-slate-300 font-sans leading-relaxed whitespace-pre-wrap max-h-36 overflow-y-auto custom-scrollbar">
+                    {projectData.description}
+                  </div>
+                </div>
+              )}
+
+              {/* Synthesized Files */}
+              {projectData.files && projectData.files.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                      Synthesized Source & Specification Files ({projectData.files.length})
+                    </h3>
+                    {projectData.files.length > 6 && (
+                      <button
+                        onClick={() => setShowAllFiles(!showAllFiles)}
+                        className="text-[11px] font-semibold text-violet-400 hover:text-violet-300 transition-colors cursor-pointer"
+                      >
+                        {showAllFiles ? "Show Less" : `View All (${projectData.files.length})`}
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(showAllFiles ? projectData.files : projectData.files.slice(0, 6)).map((file, i) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-300"
+                      >
+                        <span>📄 {file.path}</span>
+                        <span className="text-[9px] text-slate-500 font-sans">({(file.size / 1024).toFixed(1)} KB)</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Live Agent Debates & Output */}
+          <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm shadow-xl flex flex-col min-h-[500px]">
+            <div className="flex flex-wrap justify-between items-center mb-6 gap-3">
+              <div>
+                <h2 className="text-xl font-bold text-slate-100">Live Agent Debates & Output</h2>
               <p className="text-xs text-slate-400">Real-time log stream from central orchestrator multi-agent swarm</p>
             </div>
             <div className="flex items-center space-x-3">
@@ -406,7 +512,8 @@ export default function RunPipeline() {
             ))}
             <div ref={logsEndRef} />
           </div>
-        </section>
+        </div>
+      </section>
 
       </main>
     </div>

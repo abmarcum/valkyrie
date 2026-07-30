@@ -162,7 +162,8 @@ export async function generateAIAssertions(
   codebasePrompt += "Here is the codebase files that you need to write tests for:\n\n";
   
   codeFiles.forEach(f => {
-    codebasePrompt += `=== File: ${f.name} ===\n${f.content}\n\n`;
+    const fileSnippet = f.content.length > 2500 ? f.content.substring(0, 2500) + "\n...[truncated for test synthesis]" : f.content;
+    codebasePrompt += `=== File: ${f.name} ===\n${fileSnippet}\n\n`;
   });
   
   codebasePrompt += `Write a comprehensive, fully functional unit test file named '${testFilename}'.
@@ -176,12 +177,15 @@ Output ONLY the raw code inside a markdown code block (between \`\`\`${ext === "
   console.log(`[QA Agent] Querying Orchestrator LLM Proxy to analyze code and generate assertions...`);
 
   try {
+    const internalSecret = process.env.ORCHESTRATOR_INTERNAL_SECRET || "valkyrie_internal_daemon_secret";
     const url = `${orchestratorUrl}/api/projects/${projId}/llm`;
     const response = await fetch(url, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "x-valkyrie-qa-key": internalSecret
       },
+      signal: AbortSignal.timeout(45000),
       body: JSON.stringify({
         systemPrompt: "You are a professional software QA automation engineer agent.",
         userPrompt: codebasePrompt,
@@ -207,7 +211,10 @@ Output ONLY the raw code inside a markdown code block (between \`\`\`${ext === "
       return responseText.replace(/```[a-z]*\n/gi, "").replace(/```/g, "").trim();
     } else {
       const errText = await response.text();
-      console.error("[QA Agent] Orchestrator LLM proxy failed:", errText);
+      const cleanErr = errText.includes("<title>")
+        ? (errText.match(/<title>(.*?)<\/title>/i)?.[1] || "Gateway Timeout")
+        : errText.substring(0, 200);
+      console.warn(`[QA Agent] Orchestrator LLM proxy unavailable (HTTP ${response.status}): ${cleanErr}`);
     }
   } catch (err: any) {
     console.error("[QA Agent] Error contacting LLM proxy:", err.message);

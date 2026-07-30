@@ -3,7 +3,8 @@
   "private": true,
   "version": "1.0.0",
   "description": "Multi-Agent SaaS Creator Platform",
-  "packageManager": "npm@12.0.2",
+  "packageManager": "npm@10.8.2",
+  "type": "commonjs",
   "workspaces": [
     "apps/*",
     "packages/*"

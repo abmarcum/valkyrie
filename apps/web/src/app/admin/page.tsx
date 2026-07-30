@@ -299,13 +299,13 @@ export default function AdminDashboard() {
       return;
     }
     setUser(session);
-    
+
     const token = localStorage.getItem("token");
     if (token) {
       fetchStats(token);
       fetchSettings(token);
       fetchAdminLists(token);
-      
+
       const interval = setInterval(() => fetchStats(token), 5000);
       return () => clearInterval(interval);
     }
@@ -362,7 +362,7 @@ export default function AdminDashboard() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-10 space-y-8">
-        
+
         {/* Row 1: Repository Authorization & API Secret Key */}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm shadow-xl flex flex-col justify-between">
@@ -492,7 +492,7 @@ export default function AdminDashboard() {
 
         {/* Companies & Users Creator Panel */}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          
+
           {/* Companies Manager */}
           <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm shadow-xl space-y-6">
             <h2 className="text-xl font-bold text-slate-100">Company Management</h2>
@@ -536,14 +536,13 @@ export default function AdminDashboard() {
               <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Registered Companies (Click to view details)</h3>
               <div className="max-h-[200px] overflow-y-auto space-y-2 pr-2">
                 {companies.map((c) => (
-                  <div 
-                    key={c.id} 
+                  <div
+                    key={c.id}
                     onClick={() => selectCompany(c)}
-                    className={`flex justify-between items-center border p-3 rounded-lg text-xs cursor-pointer transition-all ${
-                      selectedCompanyDetail?.id === c.id 
-                        ? "bg-violet-600/10 border-violet-500/50" 
+                    className={`flex justify-between items-center border p-3 rounded-lg text-xs cursor-pointer transition-all ${selectedCompanyDetail?.id === c.id
+                        ? "bg-violet-600/10 border-violet-500/50"
                         : "bg-slate-950/40 border-slate-800/80 hover:border-slate-700"
-                    }`}
+                      }`}
                   >
                     <span className="font-semibold text-slate-200">{c.name}</span>
                     <span className="font-mono text-[10px] text-slate-500">ID: {c.id}</span>
@@ -670,7 +669,7 @@ export default function AdminDashboard() {
 
             <div className="space-y-4 pt-2">
               <h4 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Associated Projects (Click to open run view)</h4>
-              
+
               {loadingProjects ? (
                 <div className="flex items-center space-x-2 text-xs text-slate-500 py-4">
                   <div className="w-4 h-4 border-t-2 border-violet-500 animate-spin" />
