@@ -1315,6 +1315,21 @@ Return JSON ONLY in the format:
           await addLog("Developer Agent", `Architectural manifest generated (${targetFileList.length} target modules). Synthesizing code modularly...`, "info");
           for (const fileObj of targetFileList) {
             if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
+
+            // Check if file already exists on disk and is non-empty
+            const diskFilePath = path.join(__dirname, `../../../generated/${projectId}/${fileObj.path}`);
+            if (fs.existsSync(diskFilePath)) {
+              try {
+                const stat = fs.statSync(diskFilePath);
+                if (stat.isFile() && stat.size > 0) {
+                  await addLog("Developer Agent", `Skipping synthesis for existing module '${fileObj.path}' (${stat.size} bytes on disk).`, "info");
+                  const existingContent = fs.readFileSync(diskFilePath, "utf-8");
+                  codeText += `\n## ${fileObj.path}\n` + existingContent + "\n";
+                  continue;
+                }
+              } catch (e) {}
+            }
+
             const filePrompt = `You are a Principal Software Engineer implementing '${fileObj.path}' (${fileObj.description}) for this ${language} project.
 Project Description: ${description}
 PRD Summary: ${cleanPrd.substring(0, 4000)}
