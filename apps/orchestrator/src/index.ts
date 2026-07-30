@@ -721,14 +721,18 @@ async function callGeminiWithRetry(
         const data = await response.json() as any;
         if (Array.isArray(data.content)) {
           resultText = data.content
-            .filter((block: any) => block.type === "text" || (block.text && !block.thinking))
-            .map((block: any) => block.text || "")
+            .filter((block: any) => block.type === "text" && block.text)
+            .map((block: any) => block.text)
             .join("");
-          if (!resultText) {
-            resultText = data.content.map((b: any) => b.text || b.thinking || b.refusal || "").filter(Boolean).join("\n");
+
+          if (!resultText || resultText.trim() === "") {
+            resultText = data.content
+              .map((b: any) => b.text || b.thinking || (typeof b === "string" ? b : ""))
+              .filter(Boolean)
+              .join("\n");
           }
         } else {
-          resultText = data.content?.[0]?.text || "";
+          resultText = data.content?.[0]?.text || data.content?.[0]?.thinking || "";
         }
         if (!resultText && (data.stop_reason || data.error)) {
           const detail = data.error?.message || `stop_reason=${data.stop_reason}`;
