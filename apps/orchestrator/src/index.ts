@@ -983,93 +983,107 @@ async function runAgentPipeline(
         if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
 
         // Live PM call
-        const pmPrompt = `Create a Product Requirements Document (PRD) for: ${description}. Language: ${language}, Cloud: ${cloud}.`;
-        const response = await callGeminiWithRetry(
-          apiKey,
-          targetModel,
-          getPersonaSystemPrompt("Product Manager"),
-          pmPrompt,
-          addLog,
-          "Product Manager",
-          projectId,
-          useCache
-        );
-
         let prd = "";
-        if (response.content && response.content[0] && "text" in response.content[0]) {
-          prd = (response.content[0] as any).text;
+        const prdDiskPath = path.join(__dirname, `../../../generated/${projectId}/docs/prd.md`);
+        if (useCache && fs.existsSync(prdDiskPath) && fs.statSync(prdDiskPath).size > 0) {
+          prd = fs.readFileSync(prdDiskPath, "utf-8");
+          await addLog("Product Manager", `[Cache Active] Loaded existing PRD specification from docs/prd.md (${prd.length} chars).`, "info");
+          completedStatuses.add("PM_PRD");
+        } else {
+          const pmPrompt = `Create a Product Requirements Document (PRD) for: ${description}. Language: ${language}, Cloud: ${cloud}.`;
+          const response = await callGeminiWithRetry(
+            apiKey,
+            targetModel,
+            getPersonaSystemPrompt("Product Manager"),
+            pmPrompt,
+            addLog,
+            "Product Manager",
+            projectId,
+            useCache
+          );
+
+          if (response.content && response.content[0] && "text" in response.content[0]) {
+            prd = (response.content[0] as any).text;
+          }
+
+          const pmInput = response.usage?.input_tokens;
+          const pmOutput = response.usage?.output_tokens;
+          traceLlmCall("Product Manager", pmPrompt, prd, pmInput, pmOutput);
+          await updateCost(pmInput, pmOutput);
+
+          if (cohereClient) {
+            await addLog("Product Manager", "Invoking Cohere to refine and critique the PRD...", "info");
+            const refinement = await callCohereToCritique(cohereClient, prd, "Product Manager");
+            prd += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
+          }
+
+          if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
+
+          await addLog("Product Manager", `PRD generated successfully:\n${prd.substring(0, 150)}...`, "success");
+          writeDocFile(projectId, "prd.md", prd);
+          completedStatuses.add("PM_PRD");
         }
-
-        const pmInput = response.usage?.input_tokens;
-        const pmOutput = response.usage?.output_tokens;
-        traceLlmCall("Product Manager", pmPrompt, prd, pmInput, pmOutput);
-        await updateCost(pmInput, pmOutput);
-
-        if (cohereClient) {
-          await addLog("Product Manager", "Invoking Cohere to refine and critique the PRD...", "info");
-          const refinement = await callCohereToCritique(cohereClient, prd, "Product Manager");
-          prd += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
-        }
-
-        if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-
-        await addLog("Product Manager", `PRD generated successfully:\n${prd.substring(0, 150)}...`, "success");
-        writeDocFile(projectId, "prd.md", prd);
-        completedStatuses.add("PM_PRD");
 
         // Live Architect call
         currentStatus = "ARCHITECTING";
-        await addLog("Software Architect", "Generating structure tree and module boundaries.", "info");
-        const archPrompt = `Given this PRD: ${prd}, design the system directory structure and list file paths.`;
-        const archResponse = await callGeminiWithRetry(
-          apiKey,
-          targetModel,
-          getPersonaSystemPrompt("Software Architect"),
-          archPrompt,
-          addLog,
-          "Software Architect",
-          projectId,
-          useCache
-        );
-
         let archText = "";
-        if (archResponse.content && archResponse.content[0] && "text" in archResponse.content[0]) {
-          archText = (archResponse.content[0] as any).text;
+        const archDiskPath = path.join(__dirname, `../../../generated/${projectId}/docs/architecture.md`);
+        if (useCache && fs.existsSync(archDiskPath) && fs.statSync(archDiskPath).size > 0) {
+          archText = fs.readFileSync(archDiskPath, "utf-8");
+          await addLog("Software Architect", `[Cache Active] Loaded existing architecture specification from docs/architecture.md (${archText.length} chars).`, "info");
+          completedStatuses.add("ARCHITECTING");
+        } else {
+          await addLog("Software Architect", "Generating structure tree and module boundaries.", "info");
+          const archPrompt = `Given this PRD: ${prd}, design the system directory structure and list file paths.`;
+          const archResponse = await callGeminiWithRetry(
+            apiKey,
+            targetModel,
+            getPersonaSystemPrompt("Software Architect"),
+            archPrompt,
+            addLog,
+            "Software Architect",
+            projectId,
+            useCache
+          );
+
+          if (archResponse.content && archResponse.content[0] && "text" in archResponse.content[0]) {
+            archText = (archResponse.content[0] as any).text;
+          }
+
+          const archInput = archResponse.usage?.input_tokens;
+          const archOutput = archResponse.usage?.output_tokens;
+          traceLlmCall("Software Architect", archPrompt, archText, archInput, archOutput);
+          await updateCost(archInput, archOutput);
+
+          if (cohereClient) {
+            await addLog("Software Architect", "Invoking Cohere to refine and critique the architecture design...", "info");
+            const refinement = await callCohereToCritique(cohereClient, archText, "Software Architect");
+            archText += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
+          }
+
+          if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
+
+          // PM Validation loop for Architect
+          archText = await validateAndReviseResponse(
+            apiKey || "",
+            targetModel,
+            "Software Architect",
+            getPersonaSystemPrompt("Software Architect"),
+            archPrompt,
+            archText,
+            "Product Manager",
+            getPersonaSystemPrompt("Product Manager"),
+            prd,
+            projectId,
+            addLog,
+            useCache,
+            updateCost
+          );
+
+          await addLog("Software Architect", `Architecture design completed:\n${archText.substring(0, 150)}...`, "success");
+          writeDocFile(projectId, "architecture.md", archText);
+          completedStatuses.add("ARCHITECTING");
         }
-
-        const archInput = archResponse.usage?.input_tokens;
-        const archOutput = archResponse.usage?.output_tokens;
-        traceLlmCall("Software Architect", archPrompt, archText, archInput, archOutput);
-        await updateCost(archInput, archOutput);
-
-        if (cohereClient) {
-          await addLog("Software Architect", "Invoking Cohere to refine and critique the architecture design...", "info");
-          const refinement = await callCohereToCritique(cohereClient, archText, "Software Architect");
-          archText += `\n\n--- Cohere AI Quality Audit ---\n${refinement}`;
-        }
-
-        if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
-
-        // PM Validation loop for Architect
-        archText = await validateAndReviseResponse(
-          apiKey || "",
-          targetModel,
-          "Software Architect",
-          getPersonaSystemPrompt("Software Architect"),
-          archPrompt,
-          archText,
-          "Product Manager",
-          getPersonaSystemPrompt("Product Manager"),
-          prd,
-          projectId,
-          addLog,
-          useCache,
-          updateCost
-        );
-
-        await addLog("Software Architect", `Architecture design completed:\n${archText.substring(0, 150)}...`, "success");
-        writeDocFile(projectId, "architecture.md", archText);
-        completedStatuses.add("ARCHITECTING");
 
         // Phase 1: Parallelize Non-Dependent Planning Agents (Fan-Out / Fan-In)
         currentStatus = "DATA_DB";
