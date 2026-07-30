@@ -1803,11 +1803,22 @@ export function isValidFilePath(filePath: string): boolean {
   if (!filePath) return false;
   const clean = filePath.trim().replace(/^[`'"]+|[`'"]+$/g, "").replace(/[:]$/, "");
   if (!clean || clean.startsWith("#") || clean.startsWith("-") || clean.includes("..")) return false;
-  if (clean.includes(" ") || clean.includes("*") || clean.includes("<") || clean.includes(">")) return false;
+  if (clean.includes(" ") || clean.includes("*") || clean.includes("<") || clean.includes(">") || clean.includes("://")) return false;
+  if (clean.toLowerCase().startsWith("http:") || clean.toLowerCase().startsWith("https:") || clean.toLowerCase().startsWith("github.com")) return false;
 
   const base = path.basename(clean);
   const baseLower = base.toLowerCase();
   const knownFiles = new Set(["dockerfile", "makefile", "license", "go.mod", "go.sum", "go.work", "package.json", "tsconfig.json", "requirements.txt", "readme.md"]);
+
+  const segments = clean.split(/[/\\]/);
+  // Reject paths where a known single-file root name is used as a directory segment (e.g. go.mod/something.go)
+  for (let i = 0; i < segments.length - 1; i++) {
+    const segLower = segments[i].toLowerCase();
+    if (knownFiles.has(segLower)) {
+      return false;
+    }
+  }
+
   if (knownFiles.has(baseLower)) return true;
 
   const validExtensions = new Set([
@@ -1853,7 +1864,28 @@ function writeProjectFiles(projectId: string, language: string, content: string,
 
     if (fileContent.length > 0) {
       const filePath = path.join(dirPath, currentFile);
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      const parentDir = path.dirname(filePath);
+
+      // Ensure no parent directory segment is an existing file (remove file if conflict exists)
+      let checkDir = parentDir;
+      while (checkDir && checkDir !== dirPath && checkDir.startsWith(dirPath)) {
+        if (fs.existsSync(checkDir)) {
+          const stat = fs.statSync(checkDir);
+          if (!stat.isDirectory()) {
+            console.warn(`[ValkyrieParser] Removing conflicting file '${checkDir}' to create directory for '${currentFile}'`);
+            try { fs.unlinkSync(checkDir); } catch (e) {}
+          }
+        }
+        checkDir = path.dirname(checkDir);
+      }
+
+      fs.mkdirSync(parentDir, { recursive: true });
+
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+        console.warn(`[ValkyrieParser] Target path '${filePath}' is a directory. Skipping file write.`);
+        return;
+      }
+
       fs.writeFileSync(filePath, fileContent + "\n");
       console.log(`[ValkyrieParser] Wrote ${fileContent.length} bytes to: ${currentFile}`);
       parsedAny = true;

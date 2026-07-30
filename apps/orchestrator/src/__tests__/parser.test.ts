@@ -21,6 +21,18 @@ describe("isValidFilePath", () => {
     expect(isValidFilePath("pkg/types.UUID")).toBe(false);
     expect(isValidFilePath("models/User.SCHEMA")).toBe(false);
   });
+
+  it("should reject paths where a known single-file root name is used as an intermediate directory", () => {
+    expect(isValidFilePath("go.mod/main.go")).toBe(false);
+    expect(isValidFilePath("package.json/index.ts")).toBe(false);
+    expect(isValidFilePath("Dockerfile/build.sh")).toBe(false);
+  });
+
+  it("should reject URLs and domain hostnames", () => {
+    expect(isValidFilePath("https://example.com/file.go")).toBe(false);
+    expect(isValidFilePath("github.com/pkg/errors")).toBe(false);
+    expect(isValidFilePath("https:")).toBe(false);
+  });
 });
 
 describe("extractJsonBlock", () => {
