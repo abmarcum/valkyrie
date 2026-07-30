@@ -715,6 +715,7 @@ async function callGeminiWithRetry(
           body: JSON.stringify({
             model: activeModel,
             max_tokens: 8192,
+            thinking: { type: "disabled" },
             system: systemPrompt,
             messages: [{ role: "user", content: userPrompt }]
           })
@@ -1535,6 +1536,9 @@ UI Spec: ${compressedUi.substring(0, 2000)}
 
 SECURITY MANDATE:
 You must apply strict application security standards (OWASP Top 10 defense, parameterized queries, input validation/sanitization, secure credential handling, CORS/XSS protection, and error masking) directly in all synthesized code modules.
+
+SCOPE & SIZE LIMITATION:
+You must keep the implementation of module '${fileObj.path}' concise, clean, modular, and focused (target under 400 lines of code) so that the generated response completes cleanly within token output boundaries.
 
 CRITICAL REQUIREMENT:
 You must output the COMPLETE, working, production-ready source code for file '${fileObj.path}' without truncation or placeholders.
