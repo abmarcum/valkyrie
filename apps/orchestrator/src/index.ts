@@ -867,10 +867,11 @@ async function runAgentPipeline(
   useCache: boolean = true,
   dbPlatform: string = "none"
 ) {
-  // Clean generated folder to prevent stale/incorrect files from previous runs
+  // If Use Cache is FALSE, clean generated folder for a fresh rebuild from scratch
   const projectDirPath = path.join(__dirname, `../../../generated/${projectId}`);
-  if (fs.existsSync(projectDirPath)) {
-    fs.rmSync(projectDirPath, { recursive: true, force: true });
+  if (!useCache && fs.existsSync(projectDirPath)) {
+    console.log(`[ValkyrieSwarm] Use Cache is false. Cleaning generated directory for fresh rebuild of project ${projectId}...`);
+    try { fs.rmSync(projectDirPath, { recursive: true, force: true }); } catch (e) {}
   }
   fs.mkdirSync(projectDirPath, { recursive: true });
 
@@ -1316,13 +1317,13 @@ Return JSON ONLY in the format:
           for (const fileObj of targetFileList) {
             if (cancelledRuns.has(projectId)) throw new Error("SWARM_CANCELLED");
 
-            // Check if file already exists on disk and is non-empty
+            // If Use Cache is TRUE, check if file already exists on disk and is non-empty
             const diskFilePath = path.join(__dirname, `../../../generated/${projectId}/${fileObj.path}`);
-            if (fs.existsSync(diskFilePath)) {
+            if (useCache && fs.existsSync(diskFilePath)) {
               try {
                 const stat = fs.statSync(diskFilePath);
                 if (stat.isFile() && stat.size > 0) {
-                  await addLog("Developer Agent", `Skipping synthesis for existing module '${fileObj.path}' (${stat.size} bytes on disk).`, "info");
+                  await addLog("Developer Agent", `[Cache Active] Skipping synthesis for existing module '${fileObj.path}' (${stat.size} bytes on disk).`, "info");
                   const existingContent = fs.readFileSync(diskFilePath, "utf-8");
                   codeText += `\n## ${fileObj.path}\n` + existingContent + "\n";
                   continue;
