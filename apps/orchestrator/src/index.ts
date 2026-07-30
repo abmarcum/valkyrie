@@ -581,14 +581,27 @@ async function callCohereToCritique(
   agentName: string
 ): Promise<string> {
   try {
-    const response = await cohere.chat({
-      model: "command-r-plus",
-      message: `You are the AI Quality Auditor in a multi-agent swarm.
+    let cohereModel = "command-a-plus-05-2026";
+    let response;
+    try {
+      response = await cohere.chat({
+        model: cohereModel,
+        message: `You are the AI Quality Auditor in a multi-agent swarm.
 Review and critique the following generated document created by the ${agentName}.
 Check for any logical gaps, errors, or implementation problems, and suggest improvements. Keep your critique concise (maximum 3 bullet points).
 Document Content:
 ${content}`
-    });
+      });
+    } catch (e: any) {
+      response = await cohere.chat({
+        model: "command-r-plus-08-2024",
+        message: `You are the AI Quality Auditor in a multi-agent swarm.
+Review and critique the following generated document created by the ${agentName}.
+Check for any logical gaps, errors, or implementation problems, and suggest improvements. Keep your critique concise (maximum 3 bullet points).
+Document Content:
+${content}`
+      });
+    }
     return response.text || "";
   } catch (err: any) {
     console.error("[Cohere] Audit failed:", err.message);
@@ -712,10 +725,14 @@ async function callGeminiWithRetry(
             .map((block: any) => block.text || "")
             .join("");
           if (!resultText) {
-            resultText = data.content.map((b: any) => b.text || b.thinking || "").filter(Boolean).join("\n");
+            resultText = data.content.map((b: any) => b.text || b.thinking || b.refusal || "").filter(Boolean).join("\n");
           }
         } else {
           resultText = data.content?.[0]?.text || "";
+        }
+        if (!resultText && (data.stop_reason || data.error)) {
+          const detail = data.error?.message || `stop_reason=${data.stop_reason}`;
+          console.warn(`[Anthropic] Empty content returned for model '${activeModel}'. API Details: ${detail}`);
         }
         inputTokens = data.usage?.input_tokens || 0;
         outputTokens = data.usage?.output_tokens || 0;
