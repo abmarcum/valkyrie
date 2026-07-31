@@ -249,6 +249,7 @@ export default function RunPipeline() {
             description: data.description || "",
             language: data.language || "",
             cloud: data.cloud || "",
+            projectScope: data.projectScope || "medium",
             vcsRepoUrl: data.vcsRepoUrl || null,
             createdAt: data.createdAt || "",
             status: data.status || "",

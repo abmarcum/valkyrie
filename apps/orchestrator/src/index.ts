@@ -2073,6 +2073,7 @@ app.get("/api/projects/:id/stream", { preHandler: [authMiddleware] }, async (req
         projectName: run.project.name,
         language: run.project.programmingLanguage,
         cloud: run.project.deployTarget,
+        projectScope: run.project.projectScope || "medium",
         milestones: [],
         logs: JSON.parse(run.logs as string)
       })}\n\n`);
