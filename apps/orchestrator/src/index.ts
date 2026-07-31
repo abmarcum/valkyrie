@@ -2858,7 +2858,7 @@ ${errors && errors.length > 0 ? errors.join("\n") : "(No errors reported)"}
 ${logs && logs.length > 0 ? logs.join("\n") : "(No stdout output)"}
 \`\`\``;
 
-        const issueResult = await createGithubIssue(run.project.vcsRepoUrl || "", issueTitle, issueBody);
+        const issueResult = await createGithubIssue(projectId, issueTitle, issueBody);
         if (issueResult.success && issueResult.issueNumber) {
           const isDuplicate = issueResult.message.includes("Duplicate");
           updatedLogs.push({

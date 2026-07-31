@@ -10,9 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certifi
     && dpkg -i packages-microsoft-prod.deb \
     && rm packages-microsoft-prod.deb
 
-# Install multi-language compilers (Go, Java, C++, C#, Python, Node)
+# Install multi-language compilers (Java, C++, C#, Python, Node)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    golang-go \
     openjdk-17-jdk \
     maven \
     g++ \
@@ -26,6 +25,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Go 1.23.4 binary (supports log/slog and go.mod toolchain directive)
+RUN curl -fsSL https://go.dev/dl/go1.23.4.linux-amd64.tar.gz | tar -C /usr/local -xz
+ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Set working directory
 WORKDIR /app
