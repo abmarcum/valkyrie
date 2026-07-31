@@ -159,6 +159,10 @@ export async function generateAIAssertions(
   });
 
   let codebasePrompt = "You are the Valkyrie QA Agent. Analyze the generated codebase below and write a comprehensive unit/integration test suite.\n\n";
+  codebasePrompt += "STRICT SECURITY & SCOPE RULES:\n";
+  codebasePrompt += "1. You MUST ONLY write test assertions directly related to testing the functions, routes, and data models of the provided codebase.\n";
+  codebasePrompt += "2. You are STRICTLY FORBIDDEN from generating code that makes outbound network requests to external domains/IPs, accesses system files outside the sandbox directory, executes shell subprocesses, or modifies system environment variables.\n";
+  codebasePrompt += "3. All tests MUST run in-memory or against local sandbox mocks (e.g. 127.0.0.1 / localhost).\n\n";
   codebasePrompt += "Here is the codebase files that you need to write tests for:\n\n";
   
   codeFiles.forEach(f => {
@@ -187,7 +191,7 @@ Output ONLY the raw code inside a markdown code block (between \`\`\`${ext === "
       },
       signal: AbortSignal.timeout(180000),
       body: JSON.stringify({
-        systemPrompt: "You are a professional software QA automation engineer agent.",
+        systemPrompt: "You are a professional software QA automation engineer agent. Generate unit tests strictly for the provided codebase. Do not execute shell subprocesses or make external network calls.",
         userPrompt: codebasePrompt,
         agentName: "QA Engineer (Runner)"
       })
@@ -220,6 +224,28 @@ Output ONLY the raw code inside a markdown code block (between \`\`\`${ext === "
     console.error("[QA Agent] Error contacting LLM proxy:", err.message);
   }
   return "";
+}
+
+// Validate that generated test scripts do not contain dangerous shell or external network calls
+export function validateTestScriptSafety(code: string): { safe: boolean; reason?: string } {
+  if (!code || code.trim() === "") return { safe: true };
+
+  const unsafePatterns = [
+    { pattern: /child_process/i, reason: "Forbidden child_process module execution" },
+    { pattern: /os\s*\.\s*system\b/i, reason: "Forbidden OS system command execution" },
+    { pattern: /subprocess/i, reason: "Forbidden Python subprocess module" },
+    { pattern: /\b(curl|wget|nc|netcat|nmap|bash|zsh)\b/i, reason: "Forbidden shell utility reference" },
+    { pattern: /https?:\/\/(?!(127\.0\.0\.1|localhost))/i, reason: "Forbidden external network endpoint" },
+    { pattern: /rm\s+-rf/i, reason: "Forbidden destructive file deletion command" }
+  ];
+
+  for (const { pattern, reason } of unsafePatterns) {
+    if (pattern.test(code)) {
+      return { safe: false, reason };
+    }
+  }
+
+  return { safe: true };
 }
 
 // Verify that the application can start up and run without crashing
@@ -455,9 +481,14 @@ async function executeQA(targetProjectId?: string) {
     const ext = testFile.name.endsWith(".go") ? "go" : testFile.name.endsWith(".java") ? "java" : testFile.name.endsWith(".cpp") ? "cpp" : testFile.name.endsWith(".cs") ? "cs" : testFile.name.endsWith(".js") ? "js" : "py";
     const aiTestContent = await generateAIAssertions(files, testFile.name, ext, currentProjId);
     if (aiTestContent) {
-      const testFilePath = path.join(sandboxDir, testFile.name);
-      fs.writeFileSync(testFilePath, aiTestContent);
-      console.log(`[QA Agent] Overwrote mock runner with AI assertions inside: ${testFile.name}`);
+      const safetyCheck = validateTestScriptSafety(aiTestContent);
+      if (!safetyCheck.safe) {
+        console.warn(`[QA Agent] Restricted pattern detected in AI assertions (${safetyCheck.reason}). Rejecting unsafe test script to preserve environment isolation.`);
+      } else {
+        const testFilePath = path.join(sandboxDir, testFile.name);
+        fs.writeFileSync(testFilePath, aiTestContent);
+        console.log(`[QA Agent] Overwrote mock runner with AI assertions inside: ${testFile.name}`);
+      }
     }
 
     let command = "";
