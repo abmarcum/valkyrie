@@ -510,7 +510,7 @@ app.get("/api/admin/users", { preHandler: [authMiddleware, requireRole(["admin"]
 
 // REST: Initialize and trigger agent swarm
 app.post("/api/projects/run", { preHandler: [authMiddleware, requireRole(["admin", "user"])] }, async (req: FastifyRequest, reply: FastifyReply) => {
-  const { projectId, projectName, language, cloud, dbPlatform, description, vcsRepo, vcsAuthType, githubInstallationId, tenantId } = req.body as any || {};
+  const { projectId, projectName, language, cloud, dbPlatform, description, vcsRepo, vcsAuthType, githubInstallationId, tenantId, projectScope } = req.body as any || {};
   const userSession = (req as any).user;
 
   try {
@@ -524,6 +524,7 @@ app.post("/api/projects/run", { preHandler: [authMiddleware, requireRole(["admin
         description,
         programmingLanguage: language,
         deployTarget: cloud,
+        projectScope: projectScope || "medium",
         tenantId: finalTenantId,
         vcsRepoUrl: vcsRepo,
         vcsAuthType: vcsAuthType || "personal_access_token",
@@ -958,6 +959,21 @@ async function runAgentPipeline(
   await addLog("Product Manager", `Starting requirements design. Prompt: "${description}"`);
 
   try {
+    const runRecord = await prisma.agentRun.findUnique({
+      where: { id: projectId },
+      include: { project: true }
+    });
+    const projectScope = runRecord?.project?.projectScope || "medium";
+
+    let scopeInstruction = "";
+    if (projectScope === "small") {
+      scopeInstruction = "STRICT CODE FILE SCOPE CONSTRAINT: Limit the application source code manifest to exactly 2 to 4 essential core code files (excluding docs/PRD files). Keep architecture tightly focused.";
+    } else if (projectScope === "large") {
+      scopeInstruction = "ENTERPRISE CODE FILE SCOPE CONSTRAINT: Design a comprehensive multi-layer application source code manifest with 9 to 15+ code files (excluding docs/PRD files), separating models, controllers, services, middleware, and test suites.";
+    } else {
+      scopeInstruction = "CODE FILE SCOPE CONSTRAINT: Design a balanced application source code manifest with 5 to 8 modular code files (excluding docs/PRD files).";
+    }
+
     const settings = loadSettings();
     const provider = settings.selectedProvider || "google";
     const targetModel = settings.selectedModel || "gemini-3.5-flash";
@@ -1064,8 +1080,8 @@ async function runAgentPipeline(
           await addLog("Software Architect", `[Cache Active] Loaded existing architecture specification from docs/architecture.md (${archText.length} chars).`, "info");
           completedStatuses.add("ARCHITECTING");
         } else {
-          await addLog("Software Architect", "Generating structure tree and module boundaries.", "info");
-          const archPrompt = `Given this PRD: ${prd}, design the system directory structure and list file paths.`;
+          await addLog("Software Architect", `Generating structure tree and module boundaries (${projectScope.toUpperCase()} scope)...`, "info");
+          const archPrompt = `Given this PRD: ${prd}, design the system directory structure and list file paths. ${scopeInstruction}`;
           const archResponse = await callGeminiWithRetry(
             apiKey,
             targetModel,
@@ -1413,7 +1429,17 @@ async function runDeveloperSynthesis(projectId: string, useCache: boolean = true
     }
 
     if (targetFileList.length === 0) {
-      const manifestPrompt = `Based on PRD: ${compressedPrd}, System Architecture: ${compressedArch}, DB Schema: ${compressedData}, and UI Spec: ${compressedUi}, output a JSON file manifest listing all the target source code files needed for this ${language} project.
+      const projectScope = run.project.projectScope || "medium";
+      let scopeInstruction = "";
+      if (projectScope === "small") {
+        scopeInstruction = "STRICT CODE FILE SCOPE CONSTRAINT: Limit the application source code file manifest to 2 to 4 essential core code files (excluding docs/PRD files).";
+      } else if (projectScope === "large") {
+        scopeInstruction = "ENTERPRISE CODE FILE SCOPE CONSTRAINT: Design a comprehensive multi-layer application source code file manifest with 9 to 15+ code files (excluding docs/PRD files), separating models, controllers, services, middleware, and test suites.";
+      } else {
+        scopeInstruction = "CODE FILE SCOPE CONSTRAINT: Design a balanced application source code file manifest with 5 to 8 modular code files (excluding docs/PRD files).";
+      }
+
+      const manifestPrompt = `Based on PRD: ${compressedPrd}, System Architecture: ${compressedArch}, DB Schema: ${compressedData}, and UI Spec: ${compressedUi}, output a JSON file manifest listing all target application source code files needed for this ${language} project. ${scopeInstruction}
 Return JSON ONLY in the format:
 {
   "files": [
@@ -2110,6 +2136,7 @@ app.get("/api/projects/:id/run", { preHandler: [authMiddleware] }, async (req: F
       description: run.project.description || "",
       language: run.project.programmingLanguage,
       cloud: run.project.deployTarget,
+      projectScope: run.project.projectScope || "medium",
       vcsRepoUrl: run.project.vcsRepoUrl || null,
       createdAt: run.project.createdAt,
       status: run.status,

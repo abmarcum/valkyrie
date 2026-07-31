@@ -28,6 +28,7 @@ interface ProjectData {
   description: string;
   language: string;
   cloud: string;
+  projectScope?: "small" | "medium" | "large";
   vcsRepoUrl: string | null;
   createdAt: string;
   status: string;
@@ -427,6 +428,15 @@ export default function RunPipeline() {
                     <h2 className="text-xl font-bold text-slate-100">{projectData.projectName}</h2>
                     <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-violet-500/10 text-violet-400 border border-violet-500/20">
                       {projectData.language} • {projectData.cloud}
+                    </span>
+                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-mono font-bold border ${
+                      projectData.projectScope === "small"
+                        ? "bg-violet-500/10 text-violet-300 border-violet-500/30"
+                        : projectData.projectScope === "large"
+                        ? "bg-cyan-500/10 text-cyan-300 border-cyan-500/30"
+                        : "bg-indigo-500/10 text-indigo-300 border-indigo-500/30"
+                    }`}>
+                      {projectData.projectScope === "small" ? "⚡ Small Scope (2-4 Code Files)" : projectData.projectScope === "large" ? "🏛 Large Scope (9-15+ Code Files)" : "📦 Medium Scope (5-8 Code Files)"}
                     </span>
                   </div>
                   {projectData.createdAt && (

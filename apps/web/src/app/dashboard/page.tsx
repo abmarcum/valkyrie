@@ -48,8 +48,9 @@ export default function Dashboard() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [language, setLanguage] = useState("go");
-  const [cloud, setCloud] = useState("onprem");
-  const [dbPlatform, setDbPlatform] = useState("none");
+  const [cloud, setCloud] = useState("aws");
+  const [dbPlatform, setDbPlatform] = useState("postgresql");
+  const [projectScope, setProjectScope] = useState<"small" | "medium" | "large">("medium");
   const [failover, setFailover] = useState("basic");
   const [vcsRepo, setVcsRepo] = useState("");
   const [vcsAuthType, setVcsAuthType] = useState("personal_access_token");
@@ -258,6 +259,7 @@ export default function Dashboard() {
           language,
           cloud: cloud.toUpperCase(),
           dbPlatform,
+          projectScope,
           description: combinedDescription,
           vcsRepo,
           vcsAuthType,
@@ -469,6 +471,65 @@ export default function Dashboard() {
                   <option value="java">Java (Spring Boot / Maven)</option>
                   <option value="cpp">C++ (CMake / STL)</option>
                 </select>
+              </div>
+
+              {/* Source Code Scope Selection */}
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                  Source Code Scope (Application Code Files Only)
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setProjectScope("small")}
+                    disabled={isViewer}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      projectScope === "small"
+                        ? "bg-violet-950/60 border-violet-500 text-white shadow-lg shadow-violet-950/40"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-center space-x-1.5 font-bold text-xs text-violet-300">
+                      <span>⚡</span>
+                      <span>Small Scope</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1 leading-tight">2 – 4 Code Files (Microservices & Utilities)</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setProjectScope("medium")}
+                    disabled={isViewer}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      projectScope === "medium"
+                        ? "bg-violet-950/60 border-violet-500 text-white shadow-lg shadow-violet-950/40"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-center space-x-1.5 font-bold text-xs text-indigo-300">
+                      <span>📦</span>
+                      <span>Medium Scope</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1 leading-tight">5 – 8 Code Files (Standard Services)</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setProjectScope("large")}
+                    disabled={isViewer}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      projectScope === "large"
+                        ? "bg-violet-950/60 border-violet-500 text-white shadow-lg shadow-violet-950/40"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-center space-x-1.5 font-bold text-xs text-cyan-300">
+                      <span>🏛</span>
+                      <span>Large Scope</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1 leading-tight">9 – 15+ Code Files (Enterprise Multi-Layer)</p>
+                  </button>
+                </div>
               </div>
 
               <div>

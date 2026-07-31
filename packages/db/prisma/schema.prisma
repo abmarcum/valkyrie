@@ -37,6 +37,7 @@ model Project {
   vcsAuthType         String             @default("personal_access_token") // personal_access_token, github_app
   githubInstallationId String?
   deployTarget        String             @default("aws") // aws, gcp, onprem, azure
+  projectScope        String             @default("medium") // small, medium, large
   tenantId            String
   tenant              Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   agentRuns           AgentRun[]
