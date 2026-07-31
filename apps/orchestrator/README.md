@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../../docs/valkyrie-logo.jpg" alt="Valkyrie Logo" width="350" />
+</p>
+
 # Valkyrie Swarm Orchestrator Backend
 
 The Orchestrator manages the execution flow of the AI swarm. It parses developer configs, triggers sequential agent generation loops, validates code integrity, records telemetry & per-file costs, proxies LLM completions, and synthesizes Infrastructure as Code (IaC) manifests.

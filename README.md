@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/valkyrie-logo.jpg" alt="Valkyrie Logo" width="400" />
+</p>
+
 # Valkyrie: Autonomous Swarm-Driven Codebase Builder & Telemetry
 
 Valkyrie is an autonomous AI agent swarm platform designed to specify, build, verify, audit, and deploy production-grade software applications. Powered by a provider-agnostic engine, Valkyrie supports **Google Gemini**, **Anthropic Claude**, **OpenAI GPT**, and local **Ollama** models, coordinating specialized agents through a rigorous generation, self-correcting validation, and SRE deployment lifecycle.

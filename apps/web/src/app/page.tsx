@@ -7,9 +7,11 @@ export default function Home() {
       {/* Header */}
       <header className="max-w-7xl w-full mx-auto px-6 h-20 flex items-center justify-between">
         <a href="/" className="flex items-center space-x-3 hover:opacity-90 transition-opacity">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-violet-600 to-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/20">
-            V
-          </div>
+          <img
+            src="/valkyrie-logo.jpg"
+            alt="Valkyrie Logo"
+            className="w-8 h-8 rounded-lg object-cover shadow-lg shadow-indigo-500/20 border border-indigo-500/30"
+          />
           <span className="font-extrabold text-xl tracking-tight bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent">
             VALKYRIE
           </span>
