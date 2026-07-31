@@ -52,9 +52,25 @@ Users log in by entering their username at `/login`. The system issues a JWT con
 
 ---
 
+## 🐳 Containerized Deployment (Docker)
+
+The web frontend can be built and executed inside a production Docker container using [Dockerfile.web](../../Dockerfile.web):
+
+```bash
+# Build the Docker image from monorepo root
+docker build -f Dockerfile.web -t valkyrie-web:latest .
+
+# Run the container
+docker run -p 3000:3000 \
+  -e NEXT_PUBLIC_ORCHESTRATOR_URL=https://valkyrie-api.yourdomain.com \
+  valkyrie-web:latest
+```
+
+---
+
 ## 🚀 Execution Instructions
 
-Run the server independently:
+Run the server independently in development:
 ```bash
 # Start development server
 npm run dev
@@ -66,4 +82,5 @@ By default, the server boots on port `3000`.
 ## 🚀 Vercel Production Deployment
 
 To host this Next.js app on Vercel and connect it to a cloud hosted Postgres database and orchestrator server, see the **[Valkyrie Production Deployment Guide](../../docs/vercel_deployment.md)**.
+
 

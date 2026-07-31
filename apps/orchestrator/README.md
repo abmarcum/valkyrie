@@ -73,3 +73,13 @@ By default, the backend listens on port `4000`.
      docker push ghcr.io/<your-username>/valkyrie-orchestrator:latest
      ```
 
+3. **Run Container (`docker run`):**
+   ```bash
+   docker run -d \
+     --name valkyrie-orchestrator \
+     -p 4000:4000 \
+     --env-file .env \
+     -v valkyrie-generated-data:/app/generated \
+     valkyrie-orchestrator:latest
+   ```
+

@@ -122,21 +122,111 @@ Launches as a standard MCP `stdio` server, exposing QA execution tools directly 
 npm run start -w @valkyrie/qa-runner -- --mcp
 ```
 
-### Containerized QA Execution (Docker)
-To compile and execute tests inside an isolated sandbox, build the Dockerfile:
-```bash
-# Build the Docker container
-docker build -f apps/qa-runner/Dockerfile -t valkyrie-qa-runner .
+---
 
-# Execute tests containerized, mapping ports and environment variables
-docker run -e GEMINI_API_KEY=$GEMINI_API_KEY \
-           -e ORCHESTRATOR_URL=http://host.docker.internal:4000 \
-           valkyrie-qa-runner --project <project-id>
+## 🐳 Containerized Deployment (Docker & Docker Compose)
+
+Valkyrie provides container build definitions for all 3 core microservices:
+
+- **Orchestrator Backend**: [Dockerfile.backend](file:///Users/andrew/ai-workspace/code/valkyrie/Dockerfile.backend)
+- **Web Telemetry Dashboard**: [Dockerfile.web](file:///Users/andrew/ai-workspace/code/valkyrie/Dockerfile.web)
+- **Multi-Language QA Runner**: [apps/qa-runner/Dockerfile](file:///Users/andrew/ai-workspace/code/valkyrie/apps/qa-runner/Dockerfile)
+
+### 1. Building Docker Images
+```bash
+# Build Orchestrator image
+docker build -f Dockerfile.backend -t valkyrie-orchestrator:latest .
+
+# Build Web Dashboard image
+docker build -f Dockerfile.web -t valkyrie-web:latest .
+
+# Build QA Runner image (Go 1.23, Java 17, C++, .NET 8, Python 3)
+docker build -f apps/qa-runner/Dockerfile -t valkyrie-qa-runner:latest .
+```
+
+### 2. Running Individual Containers (`docker run`)
+
+#### A. Orchestrator Backend (`valkyrie-orchestrator`)
+Port `4000`, environment variables, and persistent data volume:
+```bash
+docker run -d \
+  --name valkyrie-orchestrator \
+  -p 4000:4000 \
+  --env-file .env \
+  -v valkyrie-generated-data:/app/generated \
+  valkyrie-orchestrator:latest
+```
+
+#### B. Web Telemetry Dashboard (`valkyrie-web`)
+Port `3000`, environment variables, and backend URL connection:
+```bash
+docker run -d \
+  --name valkyrie-web \
+  -p 3000:3000 \
+  --env-file .env \
+  -e PORT=3000 \
+  -e NEXT_PUBLIC_ORCHESTRATOR_URL=http://localhost:4000 \
+  valkyrie-web:latest
+```
+
+#### C. QA Runner Daemon & Single Project Execution (`valkyrie-qa-runner`)
+- **Global Listener Daemon Mode**:
+  ```bash
+  docker run -d \
+    --name valkyrie-qa-runner \
+    --env-file .env \
+    -e ORCHESTRATOR_URL=http://host.docker.internal:4000 \
+    valkyrie-qa-runner:latest
+  ```
+- **Single Project Test Execution**:
+  ```bash
+  docker run --rm \
+    --env-file .env \
+    -e ORCHESTRATOR_URL=http://host.docker.internal:4000 \
+    valkyrie-qa-runner:latest --project <project-id>
+  ```
+
+### 3. Deploying with Docker Compose
+Use `docker-compose.yml` to launch the multi-container stack in one step:
+```bash
+docker-compose up -d
+```
+* **Web Telemetry Dashboard**: [http://localhost:3000](http://localhost:3000)
+* **Central Orchestrator API**: [http://localhost:4000](http://localhost:4000)
+
+### 4. Generic Kubernetes Deployment (Helm / K8s Manifests)
+For generic Kubernetes clusters, deploy containers with environment variables:
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkyrie-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: valkyrie-web
+  template:
+    metadata:
+      labels:
+        app: valkyrie-web
+    spec:
+      containers:
+      - name: web
+        image: nas.fooguru.org:30095/valkyrie-web:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: PORT
+          value: "3000"
+        - name: NEXT_PUBLIC_ORCHESTRATOR_URL
+          value: "https://valkyrie-api.yourdomain.com"
 ```
 
 ---
 
-## 🚀 Production Deployment (Vercel & Cloud)
+## 🚀 Cloud Deployment (Vercel, Render, Railway, K8s)
 
 For production deployment configuration, database migration guides (SQLite to cloud PostgreSQL), monorepo Next.js setup on Vercel, and persistent backend configuration settings on Render or Railway, see the detailed **[Production Deployment Guide](file:///Users/andrew/ai-workspace/code/valkyrie/docs/vercel_deployment.md)**.
+
 

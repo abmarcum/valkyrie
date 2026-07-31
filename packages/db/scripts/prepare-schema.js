@@ -1,15 +1,20 @@
 const fs = require("fs");
 const path = require("path");
-const dotenv = require("dotenv");
+let dotenv;
+try {
+  dotenv = require("dotenv");
+} catch (e) { }
 
 // Load .env from root or packages/db if present
-const rootEnv = path.join(__dirname, "../../../.env");
-if (fs.existsSync(rootEnv)) {
-  dotenv.config({ path: rootEnv });
-}
-const dbEnv = path.join(__dirname, "../.env");
-if (fs.existsSync(dbEnv)) {
-  dotenv.config({ path: dbEnv });
+if (dotenv) {
+  const rootEnv = path.join(__dirname, "../../../.env");
+  if (fs.existsSync(rootEnv)) {
+    dotenv.config({ path: rootEnv });
+  }
+  const dbEnv = path.join(__dirname, "../.env");
+  if (fs.existsSync(dbEnv)) {
+    dotenv.config({ path: dbEnv });
+  }
 }
 
 const schemaPath = path.join(__dirname, "../prisma/schema.prisma");

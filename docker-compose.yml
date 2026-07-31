@@ -12,5 +12,16 @@ services:
     volumes:
       - valkyrie-generated-data:/app/generated
 
+  web:
+    image: nas.fooguru.org:30095/valkyrie-web:latest
+    container_name: valkyrie-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - PORT=3000
+
 volumes:
   valkyrie-generated-data:
