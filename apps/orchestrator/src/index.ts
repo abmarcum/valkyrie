@@ -2085,21 +2085,30 @@ function writeProjectFiles(projectId: string, language: string, content: string,
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Match file header patterns: standalone backticks e.g. "`main.go`" or tokenized markdown headers "## 1. pkg/doc.go - Shared library"
+    // Match strict file header patterns
     let matchedCandidate: string | null = null;
 
+    // Pattern 1: === File: path/to/file === or === path/to/file ===
+    const equalsMatch = line.match(/^\s*===+\s*(?:File:\s*)?([^\s=]+)\s*===+/i);
+    // Pattern 2: File: path/to/file or Path: path/to/file (must start strictly at line start with File: or Path:)
+    const fileLabelMatch = line.match(/^\s*(?:File|Path)\s*:\s*`?([^\s:`']+)`?/i);
+    // Pattern 3: Standalone backticks e.g. "`main.go`"
     const standaloneBacktick = line.match(/^\s*`([^`\s]+)`\s*$/);
-    if (standaloneBacktick && isValidFilePath(standaloneBacktick[1])) {
+    // Pattern 4: Code fence header e.g. ```yaml config.yaml or ```go main.go
+    const codeFenceHeader = line.match(/^\s*```[a-zA-Z0-9_-]*\s+`?([^\s`']+)`?/);
+    // Pattern 5: Markdown heading e.g. "## main.go" or "## 1. config.yaml - Config file"
+    const mdHeaderMatch = line.match(/^\s*#+\s*(?:File:\s*|Path:\s*|\d+\.\s*)?([^\s:]+)(?:\s+-\s+.*)?$/);
+
+    if (equalsMatch && isValidFilePath(equalsMatch[1])) {
+      matchedCandidate = equalsMatch[1];
+    } else if (fileLabelMatch && isValidFilePath(fileLabelMatch[1])) {
+      matchedCandidate = fileLabelMatch[1];
+    } else if (standaloneBacktick && isValidFilePath(standaloneBacktick[1])) {
       matchedCandidate = standaloneBacktick[1];
-    } else if (/^#+/.test(line) || /^File:|^Path:/i.test(line) || /^\s*(?:\/\/|\/\*|--|#)/.test(line)) {
-      const tokens = line.replace(/^\s*(?:#+|\/\/+|\/\*+|--+)\s*/, "").replace(/^(?:File:?|Path:?)\s*/i, "").trim().split(/\s+/);
-      for (const token of tokens) {
-        const cleaned = token.replace(/^[`'"([<]+|[`'")\]>,:]+$/g, "");
-        if (isValidFilePath(cleaned)) {
-          matchedCandidate = cleaned;
-          break;
-        }
-      }
+    } else if (codeFenceHeader && isValidFilePath(codeFenceHeader[1])) {
+      matchedCandidate = codeFenceHeader[1];
+    } else if (mdHeaderMatch && isValidFilePath(mdHeaderMatch[1])) {
+      matchedCandidate = mdHeaderMatch[1];
     }
 
     if (matchedCandidate) {
@@ -2686,7 +2695,7 @@ async function runDeveloperFix(projectId: string, errors: string[], logs: string
       codebasePrompt += "CRITICAL: Do NOT repeat the exact same modifications made in previous failed attempts. Address the underlying root cause differently to avoid oscillation.\n";
     }
 
-    codebasePrompt += "\nPlease analyze the errors and logs, modify the code files to fix the issues, and return the updated files. Ensure that database schemas or data layouts are correct. Include proper documentation. Output the updated files using path headers (e.g. ## path/to/file) so the file writer can save them to disk.";
+    codebasePrompt += "\nPlease analyze the errors and logs, modify the code files to fix the issues, and return ONLY the updated code and configuration files. Do NOT output markdown tutorials, deployment guides, or prose text into code files. Format each file header explicitly as === File: path/to/file === followed by the code block so the file writer saves them cleanly to disk.";
 
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.ANTHROPIC_API_KEY || "";
     const settings = loadSettings();
