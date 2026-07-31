@@ -35,6 +35,181 @@ interface ProjectData {
   files: Array<{ path: string; size: number }>;
 }
 
+function renderFormattedInlineText(text: string) {
+  let formatted = text
+    .replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-slate-800 text-violet-300 font-mono text-[11px] border border-slate-700">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong class="font-bold text-slate-100">$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em class="italic text-slate-300">$1</em>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-violet-400 underline hover:text-violet-300">$1</a>');
+  return <span dangerouslySetInnerHTML={{ __html: formatted }} />;
+}
+
+function SimpleMarkdownView({ content }: { content: string }) {
+  const lines = content.split(/\r?\n/);
+  const elements: React.ReactNode[] = [];
+
+  let inCodeBlock = false;
+  let codeBlockLang = "";
+  let codeBlockLines: string[] = [];
+  let inTable = false;
+  let tableHeader: string[] = [];
+  let tableRows: string[][] = [];
+
+  const flushCodeBlock = (key: string | number) => {
+    if (codeBlockLines.length > 0) {
+      elements.push(
+        <div key={`code-${key}`} className="my-4 rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-lg">
+          {codeBlockLang && (
+            <div className="px-4 py-1.5 bg-slate-900 border-b border-slate-800 text-[10px] font-mono font-bold text-violet-400 uppercase tracking-wider flex justify-between items-center">
+              <span>{codeBlockLang}</span>
+              <span className="text-slate-500 font-sans font-normal">{codeBlockLines.length} lines</span>
+            </div>
+          )}
+          <pre className="p-4 font-mono text-xs text-slate-300 overflow-x-auto whitespace-pre leading-relaxed">
+            <code>{codeBlockLines.join("\n")}</code>
+          </pre>
+        </div>
+      );
+      codeBlockLines = [];
+    }
+    inCodeBlock = false;
+    codeBlockLang = "";
+  };
+
+  const flushTable = (key: string | number) => {
+    if (tableHeader.length > 0 || tableRows.length > 0) {
+      elements.push(
+        <div key={`table-${key}`} className="my-4 overflow-x-auto rounded-xl border border-slate-800 bg-slate-950 shadow-md">
+          <table className="w-full text-left text-xs text-slate-300">
+            {tableHeader.length > 0 && (
+              <thead className="bg-slate-900/80 text-slate-200 border-b border-slate-800 font-bold">
+                <tr>
+                  {tableHeader.map((th, i) => (
+                    <th key={i} className="px-4 py-2.5 font-semibold">{th.trim()}</th>
+                  ))}
+                </tr>
+              </thead>
+            )}
+            <tbody className="divide-y divide-slate-800/60">
+              {tableRows.map((row, rIdx) => (
+                <tr key={rIdx} className="hover:bg-slate-900/40 transition-colors">
+                  {row.map((cell, cIdx) => (
+                    <td key={cIdx} className="px-4 py-2.5">{renderFormattedInlineText(cell.trim())}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      tableHeader = [];
+      tableRows = [];
+    }
+    inTable = false;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.trim().startsWith("```")) {
+      if (inCodeBlock) {
+        flushCodeBlock(i);
+      } else {
+        if (inTable) flushTable(i);
+        inCodeBlock = true;
+        codeBlockLang = line.trim().replace(/^```/, "").trim();
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeBlockLines.push(line);
+      continue;
+    }
+
+    if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+      const cells = line.trim().split("|").slice(1, -1);
+      if (cells.every(c => /^[\s\-:]+$/.test(c))) {
+        continue;
+      }
+      if (!inTable) {
+        inTable = true;
+        tableHeader = cells;
+      } else {
+        tableRows.push(cells);
+      }
+      continue;
+    } else if (inTable) {
+      flushTable(i);
+    }
+
+    if (line.startsWith("# ")) {
+      elements.push(
+        <h1 key={i} className="text-xl font-bold text-slate-100 mt-6 mb-3 pb-2 border-b border-slate-800 flex items-center space-x-2">
+          <span className="text-violet-400">#</span>
+          <span>{line.replace("# ", "")}</span>
+        </h1>
+      );
+    } else if (line.startsWith("## ")) {
+      elements.push(
+        <h2 key={i} className="text-lg font-bold text-slate-200 mt-5 mb-2.5 flex items-center space-x-2">
+          <span className="text-indigo-400">##</span>
+          <span>{line.replace("## ", "")}</span>
+        </h2>
+      );
+    } else if (line.startsWith("### ")) {
+      elements.push(
+        <h3 key={i} className="text-sm font-bold text-slate-300 mt-4 mb-2 flex items-center space-x-2">
+          <span className="text-cyan-400">###</span>
+          <span>{line.replace("### ", "")}</span>
+        </h3>
+      );
+    } else if (line.startsWith("> [!NOTE]") || line.startsWith("> [!IMPORTANT]") || line.startsWith("> [!TIP]") || line.startsWith("> [!WARNING]")) {
+      const type = line.includes("IMPORTANT") ? "IMPORTANT" : line.includes("WARNING") ? "WARNING" : line.includes("TIP") ? "TIP" : "NOTE";
+      const colorMap = {
+        NOTE: "border-blue-500/50 bg-blue-950/30 text-blue-300",
+        IMPORTANT: "border-violet-500/50 bg-violet-950/30 text-violet-300",
+        TIP: "border-emerald-500/50 bg-emerald-950/30 text-emerald-300",
+        WARNING: "border-amber-500/50 bg-amber-950/30 text-amber-300"
+      };
+      elements.push(
+        <div key={i} className={`my-3 p-3.5 rounded-xl border ${colorMap[type]} font-sans text-xs leading-relaxed`}>
+          <div className="font-bold text-[10px] uppercase tracking-wider mb-1 flex items-center space-x-1.5">
+            <span>📌</span>
+            <span>{type}</span>
+          </div>
+          <div>{renderFormattedInlineText(line.replace(/^>\s*\[![A-Z]+\]\s*/, ""))}</div>
+        </div>
+      );
+    } else if (line.trim().startsWith("- ") || line.trim().startsWith("* ")) {
+      elements.push(
+        <li key={i} className="ml-4 list-disc text-xs text-slate-300 my-1 leading-relaxed">
+          {renderFormattedInlineText(line.trim().replace(/^[\-\*]\s*/, ""))}
+        </li>
+      );
+    } else if (/^\d+\.\s/.test(line.trim())) {
+      elements.push(
+        <li key={i} className="ml-4 list-decimal text-xs text-slate-300 my-1 leading-relaxed">
+          {renderFormattedInlineText(line.trim().replace(/^\d+\.\s*/, ""))}
+        </li>
+      );
+    } else if (line.trim() === "") {
+      elements.push(<div key={i} className="h-2" />);
+    } else {
+      elements.push(
+        <p key={i} className="text-xs text-slate-300 my-1.5 leading-relaxed font-sans">
+          {renderFormattedInlineText(line)}
+        </p>
+      );
+    }
+  }
+
+  if (inCodeBlock) flushCodeBlock("end");
+  if (inTable) flushTable("end");
+
+  return <div className="space-y-1 font-sans">{elements}</div>;
+}
+
 export default function RunPipeline() {
   const router = useRouter();
   const { id } = useParams();
@@ -163,11 +338,14 @@ export default function RunPipeline() {
   const [loadingFile, setLoadingFile] = useState(false);
   const [copiedFile, setCopiedFile] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [viewMode, setViewMode] = useState<"rendered" | "raw">("rendered");
 
   const handleOpenFile = async (filePath: string) => {
     const token = localStorage.getItem("token");
     if (!token || !id) return;
     setLoadingFile(true);
+    const isMarkdown = filePath.toLowerCase().endsWith(".md") || filePath.toLowerCase().includes("doc");
+    setViewMode(isMarkdown ? "rendered" : "raw");
     try {
       const res = await fetch(`${ORCHESTRATOR_URL}/api/projects/${id}/file?path=${encodeURIComponent(filePath)}`, {
         headers: {
@@ -635,13 +813,44 @@ export default function RunPipeline() {
                 <div>
                   <h3 className="text-sm font-bold font-mono text-slate-100">{activeFile?.path || "Loading file..."}</h3>
                   {activeFile && (
-                    <span className="text-[10px] text-slate-400 font-sans">
-                      {(activeFile.size / 1024).toFixed(2)} KB • {activeFile.content.split('\n').length} lines
-                    </span>
+                    <div className="flex items-center space-x-2 text-[10px] text-slate-400 font-sans mt-0.5">
+                      <span>{(activeFile.size / 1024).toFixed(2)} KB</span>
+                      <span>•</span>
+                      <span>{activeFile.content.split('\n').length} lines</span>
+                    </div>
                   )}
                 </div>
               </div>
-              <div className="flex items-center space-x-2">
+
+              <div className="flex items-center space-x-3">
+                {/* View Mode Toggle: Rendered Markup vs Raw Code */}
+                {activeFile && (
+                  <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-1 space-x-1">
+                    <button
+                      onClick={() => setViewMode("rendered")}
+                      className={`px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer flex items-center space-x-1 ${
+                        viewMode === "rendered"
+                          ? "bg-violet-600 text-white shadow-sm"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <span>👁</span>
+                      <span>Rendered Markup</span>
+                    </button>
+                    <button
+                      onClick={() => setViewMode("raw")}
+                      className={`px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer flex items-center space-x-1 ${
+                        viewMode === "raw"
+                          ? "bg-violet-600 text-white shadow-sm"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <span>📝</span>
+                      <span>Raw Code</span>
+                    </button>
+                  </div>
+                )}
+
                 {activeFile && (
                   <button
                     onClick={() => {
@@ -674,16 +883,20 @@ export default function RunPipeline() {
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 overflow-y-auto font-mono text-xs text-slate-200 bg-slate-950 custom-scrollbar flex-1">
+            <div className="p-6 overflow-y-auto bg-slate-950 custom-scrollbar flex-1">
               {loadingFile ? (
                 <div className="py-16 text-center space-y-3">
                   <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
                   <p className="text-xs text-slate-400">Loading file content...</p>
                 </div>
               ) : activeFile ? (
-                <pre className="whitespace-pre-wrap leading-relaxed select-text font-mono text-slate-300">
-                  <code>{activeFile.content}</code>
-                </pre>
+                viewMode === "rendered" ? (
+                  <SimpleMarkdownView content={activeFile.content} />
+                ) : (
+                  <pre className="whitespace-pre-wrap leading-relaxed select-text font-mono text-xs text-slate-300">
+                    <code>{activeFile.content}</code>
+                  </pre>
+                )
               ) : null}
             </div>
           </div>
