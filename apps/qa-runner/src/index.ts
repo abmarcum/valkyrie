@@ -226,7 +226,15 @@ Output ONLY the raw code inside a markdown code block (between \`\`\`${ext === "
 export function verifyApplicationStartup(sandboxDir: string, mainFilename: string, hasUv: boolean): Promise<{ success: boolean, logs: string[], errorMsg: string }> {
   return new Promise(async (resolve) => {
     let command = "";
-    if (mainFilename.endsWith(".js")) {
+    if (mainFilename.endsWith(".go")) {
+      command = `go run "${path.join(sandboxDir, mainFilename)}" || go build -v ./...`;
+    } else if (mainFilename.endsWith(".java")) {
+      command = `mvn compile || javac "${path.join(sandboxDir, mainFilename)}"`;
+    } else if (mainFilename.endsWith(".cpp")) {
+      command = `g++ -std=c++17 -o app "${path.join(sandboxDir, mainFilename)}"`;
+    } else if (mainFilename.endsWith(".cs")) {
+      command = `dotnet build`;
+    } else if (mainFilename.endsWith(".js") || mainFilename.endsWith(".ts")) {
       command = `node "${path.join(sandboxDir, mainFilename)}"`;
     } else {
       if (hasUv) {
@@ -339,14 +347,28 @@ async function executeQA(targetProjectId?: string) {
   try {
     console.log(`\n[1/3] Downloading generated codebase files for project '${currentProjId}'...`);
     let files = await downloadWorkspaceFiles(currentProjId);
+    
+    const isGo = files.some(f => f.name.endsWith(".go") || f.name === "go.mod");
+    const isJava = files.some(f => f.name.endsWith(".java") || f.name === "pom.xml");
+    const isCpp = files.some(f => f.name.endsWith(".cpp") || f.name === "CMakeLists.txt");
+    const isCsharp = files.some(f => f.name.endsWith(".cs") || f.name === "App.csproj");
+    const isPython = files.some(f => f.name.endsWith(".py") || f.name === "requirements.txt");
+    const isNode = files.some(f => f.name.endsWith(".js") || f.name.endsWith(".ts") || f.name === "package.json");
+
     const findTestFile = (fileList: Array<{ name: string; content: string }>) => {
       return fileList.find(f => {
         const nameLower = f.name.toLowerCase();
-        return nameLower.startsWith("test.") || 
-               nameLower.startsWith("tests/test_") || 
+        return nameLower.endsWith("_test.go") || 
+               nameLower.endsWith("test.go") || 
                nameLower.endsWith("_test.py") || 
                nameLower.endsWith(".test.js") || 
-               nameLower.endsWith(".test.ts");
+               nameLower.endsWith(".test.ts") ||
+               nameLower.endsWith("test.java") ||
+               nameLower.endsWith("tests.java") ||
+               nameLower.endsWith("test.cpp") ||
+               nameLower.endsWith("tests.cs") ||
+               nameLower.startsWith("test.") || 
+               nameLower.startsWith("tests/test_");
       });
     };
     let testFile = findTestFile(files);
@@ -356,22 +378,18 @@ async function executeQA(targetProjectId?: string) {
       while (files.length === 0 || !testFile) {
         const currentStatus = await fetchProjectStatus(currentProjId);
         
-        // If the execution has finished or was cancelled, we stop waiting
         if (currentStatus === "SUCCESS" || currentStatus === "FAILED" || currentStatus === "CANCELLED") {
           console.log(`[QA Runner] Pipeline execution ended with status: ${currentStatus} without generating a test plan.`);
           sendReport(currentProjId, true, ["No test scripts found. Pipeline ended."], []);
           return;
         }
 
-        // If the status is QA_LOOP (meaning we are ready to test) and we still have no test file,
-        // we break the loop and create a default test file rather than waiting indefinitely.
         if (currentStatus === "QA_LOOP" && files.length > 0) {
           console.log(`[QA Runner] Pipeline is in QA_LOOP but no test plan file was generated. Creating default test script...`);
-          const isPython = files.some(f => f.name.endsWith(".py") || f.name === "requirements.txt");
-          const defaultTestName = isPython ? "test.py" : "test.js";
+          const defaultTestName = isGo ? "main_test.go" : isJava ? "ApplicationTests.java" : isCpp ? "test_main.cpp" : isCsharp ? "AppTests.cs" : isPython ? "test.py" : "test.js";
           testFile = {
             name: defaultTestName,
-            content: isPython ? "# Placeholder test suite" : "// Placeholder test suite"
+            content: isGo ? "package main\nimport \"testing\"\nfunc TestApp(t *testing.T){}" : isPython ? "# Placeholder test suite" : "// Placeholder test suite"
           };
           files.push(testFile);
           break;
@@ -401,15 +419,18 @@ async function executeQA(targetProjectId?: string) {
       console.log(`  -> Wrote ${file.name}`);
     });
 
-    // Locate application entry point and verify startup
-    const mainFile = files.find(f => f.name === "main.py" || f.name === "main.js" || f.name === "index.js" || f.name === "app/main.py" || f.name === "app/main.js");
+    // Locate application entry point and verify startup / compilation
+    const mainFile = files.find(f => {
+      const n = f.name.toLowerCase();
+      return n === "main.go" || n === "main.py" || n === "main.js" || n === "index.js" || n === "src/main.cpp" || n === "program.cs" || n.endsWith("application.java");
+    });
     if (mainFile) {
       const hasUv = await new Promise<boolean>((resolve) => {
         exec("command -v uv", (err) => resolve(!err));
       });
       const startupResult = await verifyApplicationStartup(sandboxDir, mainFile.name, hasUv);
       if (!startupResult.success) {
-        console.error(`\n❌ QA Runner: Application failed to start!`);
+        console.error(`\n❌ QA Runner: Application failed to start/compile!`);
         console.error(startupResult.errorMsg);
         
         sendReport(currentProjId, false, startupResult.logs, [startupResult.errorMsg]);
@@ -431,7 +452,7 @@ async function executeQA(targetProjectId?: string) {
 
     console.log(`[3/3] Locating and executing test script assertions...`);
 
-    const ext = testFile.name.endsWith(".js") ? "js" : "py";
+    const ext = testFile.name.endsWith(".go") ? "go" : testFile.name.endsWith(".java") ? "java" : testFile.name.endsWith(".cpp") ? "cpp" : testFile.name.endsWith(".cs") ? "cs" : testFile.name.endsWith(".js") ? "js" : "py";
     const aiTestContent = await generateAIAssertions(files, testFile.name, ext, currentProjId);
     if (aiTestContent) {
       const testFilePath = path.join(sandboxDir, testFile.name);
@@ -440,15 +461,15 @@ async function executeQA(targetProjectId?: string) {
     }
 
     let command = "";
-    if (testFile.name.endsWith(".go") || fs.existsSync(path.join(sandboxDir, "go.mod"))) {
-      command = `go test -v ./...`;
-    } else if (testFile.name.endsWith(".java") || fs.existsSync(path.join(sandboxDir, "pom.xml"))) {
+    if (isGo || testFile.name.endsWith(".go")) {
+      command = `go test -v ./... || go build -v ./...`;
+    } else if (isJava || testFile.name.endsWith(".java")) {
       command = `mvn test || javac -d build ${testFile.name}`;
-    } else if (testFile.name.endsWith(".cpp") || fs.existsSync(path.join(sandboxDir, "CMakeLists.txt"))) {
+    } else if (isCpp || testFile.name.endsWith(".cpp")) {
       command = `cmake -B build && cmake --build build || g++ -std=c++17 -o app ${testFile.name}`;
-    } else if (testFile.name.endsWith(".cs") || fs.existsSync(path.join(sandboxDir, "App.csproj"))) {
+    } else if (isCsharp || testFile.name.endsWith(".cs")) {
       command = `dotnet test || dotnet build`;
-    } else if (testFile.name.endsWith(".js")) {
+    } else if (testFile.name.endsWith(".js") || testFile.name.endsWith(".ts")) {
       command = `node "${path.join(sandboxDir, testFile.name)}"`;
     } else {
       const hasUv = await new Promise<boolean>((resolve) => {

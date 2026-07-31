@@ -4,13 +4,26 @@ FROM node:24-bookworm-slim
 # Copy uv binary from the official uv image
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Install Python and build dependencies
+# Install Microsoft APT Repository for .NET SDK
+RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates \
+    && wget https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O packages-microsoft-prod.deb \
+    && dpkg -i packages-microsoft-prod.deb \
+    && rm packages-microsoft-prod.deb
+
+# Install multi-language compilers (Go, Java, C++, C#, Python, Node)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    golang-go \
+    openjdk-17-jdk \
+    maven \
+    g++ \
+    cmake \
+    make \
+    dotnet-sdk-8.0 \
     python3 \
     python3-pip \
     python3-venv \
     curl \
-    ca-certificates \
+    git \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
