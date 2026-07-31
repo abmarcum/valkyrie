@@ -432,10 +432,13 @@ async function executeQA(targetProjectId?: string) {
 
     // Prepare local sandbox folder
     const sandboxDir = path.join(__dirname, "../sandbox", currentProjId);
-    if (fs.existsSync(sandboxDir)) {
-      fs.rmSync(sandboxDir, { recursive: true, force: true });
-    }
     fs.mkdirSync(sandboxDir, { recursive: true });
+    try {
+      const existingEntries = fs.readdirSync(sandboxDir);
+      for (const entry of existingEntries) {
+        fs.rmSync(path.join(sandboxDir, entry), { recursive: true, force: true });
+      }
+    } catch (e) { }
 
     console.log(`[2/3] Writing files to local sandbox: ${sandboxDir}`);
     files.forEach(file => {
