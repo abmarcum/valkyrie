@@ -424,7 +424,7 @@ app.post("/api/projects/:id/llm", async (req: FastifyRequest, reply: FastifyRepl
   try {
     const settings = loadSettings();
     const targetModel = settings.selectedModel || "gemini-3.5-flash";
-    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || "";
 
     const response = await callGeminiWithRetry(
       apiKey,
@@ -1992,13 +1992,14 @@ export function isValidFilePath(filePath: string): boolean {
   if (!filePath) return false;
   const clean = filePath.trim().replace(/^[`'"]+|[`'"]+$/g, "").replace(/[:]$/, "");
   if (!clean || clean.startsWith("#") || clean.startsWith("-") || clean.includes("..")) return false;
-  if (clean.includes(" ") || clean.includes("*") || clean.includes("<") || clean.includes(">") || clean.includes("://")) return false;
+  if (clean.includes(" ") || clean.includes("=") || clean.includes("*") || clean.includes("<") || clean.includes(">") || clean.includes("://")) return false;
   if (clean.toLowerCase().startsWith("http:") || clean.toLowerCase().startsWith("https:") || clean.toLowerCase().startsWith("github.com")) return false;
 
   const validExtensions = new Set([
     ".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".java", ".cpp", ".c", ".h",
     ".cs", ".rb", ".php", ".rs", ".sql", ".css", ".html", ".json", ".yaml",
-    ".yml", ".md", ".txt", ".sh", ".dockerfile", ".mod", ".work", ".sum", ".env"
+    ".yml", ".md", ".txt", ".sh", ".dockerfile", ".mod", ".work", ".sum", ".env",
+    ".tf", ".tfvars", ".hcl", ".proto", ".graphql", ".toml", ".ini", ".cfg"
   ]);
   const knownFiles = new Set(["dockerfile", "makefile", "license", "go.mod", "go.sum", "go.work", "package.json", "tsconfig.json", "requirements.txt", "readme.md"]);
 

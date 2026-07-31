@@ -2,17 +2,21 @@ import { describe, it, expect } from "vitest";
 import { isValidFilePath, stripCritiqueHeaders, extractJsonBlock } from "../index";
 
 describe("isValidFilePath", () => {
-  it("should return true for valid code file paths", () => {
+  it("should return true for valid code and infrastructure file paths", () => {
     expect(isValidFilePath("src/index.ts")).toBe(true);
     expect(isValidFilePath("package.json")).toBe(true);
     expect(isValidFilePath("Dockerfile")).toBe(true);
     expect(isValidFilePath("main.go")).toBe(true);
     expect(isValidFilePath("data/schema.sql")).toBe(true);
+    expect(isValidFilePath("terraform/main.tf")).toBe(true);
+    expect(isValidFilePath("terraform.tfvars")).toBe(true);
+    expect(isValidFilePath("deploy/config.hcl")).toBe(true);
   });
 
-  it("should reject path traversal attempts and invalid markdown titles", () => {
+  it("should reject path traversal attempts, equals signs, and invalid markdown titles", () => {
     expect(isValidFilePath("../secret.env")).toBe(false);
     expect(isValidFilePath("## Markdown Title")).toBe(false);
+    expect(isValidFilePath("from-file=config.yaml=./config.yaml")).toBe(false);
     expect(isValidFilePath("")).toBe(false);
     expect(isValidFilePath("- bullet point")).toBe(false);
   });
@@ -22,7 +26,8 @@ describe("isValidFilePath", () => {
     expect(isValidFilePath("models/User.SCHEMA")).toBe(false);
   });
 
-  it("should reject paths where a known single-file root name is used as an intermediate directory", () => {
+  it("should reject paths where a code extension or single-file root name is used as an intermediate directory", () => {
+    expect(isValidFilePath("main.go/proxy.go")).toBe(false);
     expect(isValidFilePath("go.mod/main.go")).toBe(false);
     expect(isValidFilePath("package.json/index.ts")).toBe(false);
     expect(isValidFilePath("Dockerfile/build.sh")).toBe(false);
