@@ -462,13 +462,13 @@ async function executeQA(targetProjectId?: string) {
 
     let command = "";
     if (isGo || testFile.name.endsWith(".go")) {
-      command = `go test -v ./... || go build -v ./...`;
+      command = `go test -v ./...`;
     } else if (isJava || testFile.name.endsWith(".java")) {
-      command = `mvn test || javac -d build ${testFile.name}`;
+      command = `mvn test`;
     } else if (isCpp || testFile.name.endsWith(".cpp")) {
-      command = `cmake -B build && cmake --build build || g++ -std=c++17 -o app ${testFile.name}`;
+      command = `cmake -B build && cmake --build build`;
     } else if (isCsharp || testFile.name.endsWith(".cs")) {
-      command = `dotnet test || dotnet build`;
+      command = `dotnet test`;
     } else if (testFile.name.endsWith(".js") || testFile.name.endsWith(".ts")) {
       command = `node "${path.join(sandboxDir, testFile.name)}"`;
     } else {
@@ -550,11 +550,17 @@ async function executeQA(targetProjectId?: string) {
         console.error("[QA Agent] Failed to write local log file:", logErr.message);
       }
 
-      if (error) {
+      const isTestFailure = Boolean(error) ||
+        /^FAIL\s/m.test(stdout) ||
+        /^FAIL\t/m.test(stdout) ||
+        /--- FAIL:/m.test(stdout) ||
+        /\bFAIL\b/m.test(stdout);
+
+      if (isTestFailure) {
         console.error(`\n❌ QA Suite Failure reported!`);
-        console.error(stderr || error.message);
-        errors.push(error.message);
-        sendReport(currentProjId, false, logs, errors);
+        console.error(stderr || stdout || (error ? error.message : "Test suite assertions failed"));
+        if (error) errors.push(error.message);
+        sendReport(currentProjId, false, logs, errors.length > 0 ? errors : [stdout]);
 
         if (fixAttempts >= MAX_FIX_ATTEMPTS) {
           console.error(`\n❌ QA Runner: Exceeded maximum fix attempts (${MAX_FIX_ATTEMPTS}). Halting self-healing loop.`);
