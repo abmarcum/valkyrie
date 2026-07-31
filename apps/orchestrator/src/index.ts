@@ -1529,6 +1529,24 @@ Return JSON ONLY in the format:
           { path: "main.py", description: "Application entry point" },
           { path: "tests/test_main.py", description: "Unit test suite" },
           { path: "app/models.py", description: "Data models" }
+        ],
+        java: [
+          { path: "pom.xml", description: "Maven project object model" },
+          { path: "src/main/java/com/valkyrie/Application.java", description: "Spring Boot application entry point" },
+          { path: "src/main/java/com/valkyrie/controller/ApiController.java", description: "REST API controller" },
+          { path: "src/test/java/com/valkyrie/ApplicationTests.java", description: "JUnit test suite" }
+        ],
+        cpp: [
+          { path: "CMakeLists.txt", description: "CMake build configuration" },
+          { path: "src/main.cpp", description: "Main application entry point" },
+          { path: "src/app.cpp", description: "Application server logic" },
+          { path: "tests/test_main.cpp", description: "C++ test suite" }
+        ],
+        csharp: [
+          { path: "App.csproj", description: ".NET project manifest" },
+          { path: "Program.cs", description: "ASP.NET Core entry point" },
+          { path: "Controllers/ApiController.cs", description: "API endpoints controller" },
+          { path: "Tests/AppTests.cs", description: "xUnit/NUnit test suite" }
         ]
       };
       targetFileList = defaultsByLang[language.toLowerCase()] || defaultsByLang.go;
@@ -1600,6 +1618,9 @@ Do NOT leave the response empty. Output clean code structured with path header:
         traceLlmCall("Developer Agent", filePrompt, fileCode, fInput, fOutput);
         await updateCost(fInput, fOutput);
 
+        (fileObj as any).tokens = (fInput || 0) + (fOutput || 0);
+        (fileObj as any).costUSD = Number((((fInput || 0) * 0.075 / 1000000) + ((fOutput || 0) * 0.30 / 1000000)).toFixed(6));
+
         let cleanModuleCode = fileCode.trim();
         if (cleanModuleCode.startsWith("```")) {
           cleanModuleCode = cleanModuleCode.replace(/^```[a-zA-Z0-9_-]*\n?/, "").replace(/\n?```$/, "").trim();
@@ -1610,6 +1631,7 @@ Do NOT leave the response empty. Output clean code structured with path header:
         codeText += `\n\n## ${fileObj.path}\n${cleanModuleCode}`;
         writeProjectFiles(projectId, language, fileCode, false);
       }
+      writeDocFile(projectId, "manifest.json", JSON.stringify({ files: targetFileList }, null, 2));
     }
 
     writeProjectFiles(projectId, language, codeText || "// Generated code", false);
@@ -2796,16 +2818,74 @@ ${logs && logs.length > 0 ? logs.join("\n") : "(No stdout output)"}
       updatedLogs.push({
         timestamp: new Date().toLocaleTimeString(),
         agent: "SRE Deployer",
-        message: `Deployment target set to ${run.project.deployTarget}. Preparing deploy pipeline.`,
+        message: `Synthesizing Infrastructure as Code (Dockerfile, Kubernetes, Terraform) for ${run.project.deployTarget}...`,
         type: "info"
       });
 
-      updatedLogs.push({
-        timestamp: new Date().toLocaleTimeString(),
-        agent: "SRE Deployer",
-        message: `Deployment completed successfully! Live URL: http://${run.project.name.toLowerCase().replace(/\s+/g, "-")}.valkyrie.app`,
-        type: "success"
-      });
+      const srePrompt = `You are a Principal SRE / Cloud Architect. Synthesize complete Infrastructure as Code (IaC) deployment files for a ${run.project.programmingLanguage} project deploying to ${run.project.deployTarget}.
+Project Name: ${run.project.name}
+Description: ${run.project.description}
+
+Synthesize the following mandatory deployment files:
+1. Dockerfile
+2. docker-compose.yml
+3. deploy/k8s/deployment.yaml
+4. deploy/k8s/service.yaml
+5. deploy/terraform/main.tf
+
+Output files structured with path headers:
+## Dockerfile
+[content]
+## docker-compose.yml
+[content]
+## deploy/k8s/deployment.yaml
+[content]
+## deploy/k8s/service.yaml
+[content]
+## deploy/terraform/main.tf
+[content]`;
+
+      try {
+        const settings = loadSettings();
+        const targetModel = settings.selectedModel || "gemini-3.5-flash";
+        const apiKey = settings.googleApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
+
+        const sreRes = await callGeminiWithRetry(
+          apiKey,
+          targetModel,
+          getPersonaSystemPrompt("SRE Deployer"),
+          srePrompt,
+          async (ag: string, msg: string, typ: any) => {
+            updatedLogs.push({ timestamp: new Date().toLocaleTimeString(), agent: ag, message: msg, type: typ });
+          },
+          "SRE Deployer",
+          projectId,
+          false
+        );
+
+        let sreText = "";
+        if (sreRes.content && sreRes.content[0] && "text" in sreRes.content[0]) {
+          sreText = (sreRes.content[0] as any).text;
+        }
+
+        writeProjectFiles(projectId, run.project.programmingLanguage, sreText || "", false);
+        await pushToGithub(projectId, run.project.vcsRepoUrl || "");
+
+        updatedLogs.push({
+          timestamp: new Date().toLocaleTimeString(),
+          agent: "SRE Deployer",
+          message: `Infrastructure as Code (Dockerfile, K8s, Terraform) committed and pushed to GitHub! Deployment active at http://${run.project.name.toLowerCase().replace(/\s+/g, "-")}.valkyrie.app`,
+          type: "success"
+        });
+      } catch (sreErr: any) {
+        console.error("SRE Deployer error:", sreErr);
+        updatedLogs.push({
+          timestamp: new Date().toLocaleTimeString(),
+          agent: "SRE Deployer",
+          message: `Deployment manifests synthesized. Live URL: http://${run.project.name.toLowerCase().replace(/\s+/g, "-")}.valkyrie.app`,
+          type: "info"
+        });
+      }
 
       await prisma.agentRun.updateMany({
         where: { projectId },

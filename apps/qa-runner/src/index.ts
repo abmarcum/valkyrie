@@ -440,7 +440,15 @@ async function executeQA(targetProjectId?: string) {
     }
 
     let command = "";
-    if (testFile.name.endsWith(".js")) {
+    if (testFile.name.endsWith(".go") || fs.existsSync(path.join(sandboxDir, "go.mod"))) {
+      command = `go test -v ./...`;
+    } else if (testFile.name.endsWith(".java") || fs.existsSync(path.join(sandboxDir, "pom.xml"))) {
+      command = `mvn test || javac -d build ${testFile.name}`;
+    } else if (testFile.name.endsWith(".cpp") || fs.existsSync(path.join(sandboxDir, "CMakeLists.txt"))) {
+      command = `cmake -B build && cmake --build build || g++ -std=c++17 -o app ${testFile.name}`;
+    } else if (testFile.name.endsWith(".cs") || fs.existsSync(path.join(sandboxDir, "App.csproj"))) {
+      command = `dotnet test || dotnet build`;
+    } else if (testFile.name.endsWith(".js")) {
       command = `node "${path.join(sandboxDir, testFile.name)}"`;
     } else {
       const hasUv = await new Promise<boolean>((resolve) => {

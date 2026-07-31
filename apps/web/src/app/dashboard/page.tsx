@@ -470,6 +470,7 @@ export default function Dashboard() {
                   <option value="python">Python (FastAPI/Django)</option>
                   <option value="java">Java (Spring Boot / Maven)</option>
                   <option value="cpp">C++ (CMake / STL)</option>
+                  <option value="csharp">C# (.NET 8 / ASP.NET Core)</option>
                 </select>
               </div>
 

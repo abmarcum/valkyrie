@@ -32,7 +32,7 @@ interface ProjectData {
   vcsRepoUrl: string | null;
   createdAt: string;
   status: string;
-  files: Array<{ path: string; size: number }>;
+  files: Array<{ path: string; size: number; tokens?: number; costUSD?: number }>;
 }
 
 function renderFormattedInlineText(text: string) {
@@ -334,7 +334,7 @@ export default function RunPipeline() {
     },
   ]);
 
-  const [activeFile, setActiveFile] = useState<{ path: string; content: string; size: number } | null>(null);
+  const [activeFile, setActiveFile] = useState<{ path: string; content: string; size: number; tokens?: number; costUSD?: number } | null>(null);
   const [loadingFile, setLoadingFile] = useState(false);
   const [copiedFile, setCopiedFile] = useState(false);
   const [approving, setApproving] = useState(false);
@@ -354,7 +354,8 @@ export default function RunPipeline() {
       });
       if (res.ok) {
         const data = await res.json();
-        setActiveFile({ path: data.path, content: data.content, size: data.size });
+        const matched = projectData?.files?.find(f => f.path === filePath);
+        setActiveFile({ path: data.path, content: data.content, size: data.size, tokens: matched?.tokens, costUSD: matched?.costUSD });
       } else {
         alert("Failed to load file content.");
       }
@@ -680,6 +681,11 @@ export default function RunPipeline() {
                       >
                         <span className="group-hover:text-violet-400">📄 {file.path}</span>
                         <span className="text-[9px] text-slate-500 font-sans">({(file.size / 1024).toFixed(1)} KB)</span>
+                        {file.costUSD !== undefined && file.costUSD > 0 && (
+                          <span className="px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-mono font-semibold">
+                            💵 ${file.costUSD.toFixed(5)}
+                          </span>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -817,6 +823,12 @@ export default function RunPipeline() {
                       <span>{(activeFile.size / 1024).toFixed(2)} KB</span>
                       <span>•</span>
                       <span>{activeFile.content.split('\n').length} lines</span>
+                      {activeFile.costUSD !== undefined && activeFile.costUSD > 0 && (
+                        <>
+                          <span>•</span>
+                          <span className="text-emerald-400 font-semibold font-mono">💵 ${activeFile.costUSD.toFixed(5)} ({activeFile.tokens?.toLocaleString()} tokens)</span>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
