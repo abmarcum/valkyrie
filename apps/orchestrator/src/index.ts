@@ -2121,6 +2121,56 @@ app.get("/api/projects/:id/run", { preHandler: [authMiddleware] }, async (req: F
   }
 });
 
+// REST: Get single file content for project preview
+app.get("/api/projects/:id/file", { preHandler: [authMiddleware] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  const projectId = (req.params as any).id;
+  const filePath = (req.query as any).path;
+  const user = (req as any).user;
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) {
+    return reply.status(400).send({ error: "Invalid project ID format." });
+  }
+  if (!filePath || typeof filePath !== "string") {
+    return reply.status(400).send({ error: "File path query parameter is required." });
+  }
+
+  try {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId }
+    });
+
+    if (!project || (user.role !== "admin" && project.tenantId !== user.tenantId)) {
+      return reply.status(404).send({ error: "Project not found." });
+    }
+
+    const basePath = path.resolve(__dirname, "../../../generated", projectId);
+    const targetPath = path.resolve(basePath, filePath);
+
+    // Prevent path traversal attacks
+    if (!targetPath.startsWith(basePath)) {
+      return reply.status(403).send({ error: "Access denied." });
+    }
+
+    if (!fs.existsSync(targetPath)) {
+      return reply.status(404).send({ error: "File not found." });
+    }
+
+    const stat = fs.statSync(targetPath);
+    if (!stat.isFile()) {
+      return reply.status(400).send({ error: "Path is not a file." });
+    }
+
+    const content = fs.readFileSync(targetPath, "utf-8");
+    return reply.send({
+      path: filePath,
+      content,
+      size: stat.size
+    });
+  } catch (err: any) {
+    return reply.status(500).send({ error: err.message });
+  }
+});
+
 // REST: Get all projects
 app.get("/api/projects", { preHandler: [authMiddleware] }, async (req: FastifyRequest, reply: FastifyReply) => {
   const user = (req as any).user;

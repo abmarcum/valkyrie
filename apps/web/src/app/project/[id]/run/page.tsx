@@ -158,7 +158,33 @@ export default function RunPipeline() {
     },
   ]);
 
+  const [activeFile, setActiveFile] = useState<{ path: string; content: string; size: number } | null>(null);
+  const [loadingFile, setLoadingFile] = useState(false);
+  const [copiedFile, setCopiedFile] = useState(false);
   const [approving, setApproving] = useState(false);
+
+  const handleOpenFile = async (filePath: string) => {
+    const token = localStorage.getItem("token");
+    if (!token || !id) return;
+    setLoadingFile(true);
+    try {
+      const res = await fetch(`${ORCHESTRATOR_URL}/api/projects/${id}/file?path=${encodeURIComponent(filePath)}`, {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setActiveFile({ path: data.path, content: data.content, size: data.size });
+      } else {
+        alert("Failed to load file content.");
+      }
+    } catch (e: any) {
+      alert("Error loading file content: " + e.message);
+    } finally {
+      setLoadingFile(false);
+    }
+  };
 
   const handleApprove = async () => {
     const token = localStorage.getItem("token");
@@ -457,13 +483,15 @@ export default function RunPipeline() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {(showAllFiles ? projectData.files : projectData.files.slice(0, 6)).map((file, i) => (
-                      <span
+                      <button
                         key={i}
-                        className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-300"
+                        onClick={() => handleOpenFile(file.path)}
+                        className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-violet-500/50 text-[11px] font-mono text-slate-300 hover:text-white transition-all cursor-pointer shadow-sm group"
+                        title={`Click to view contents of ${file.path}`}
                       >
-                        <span>📄 {file.path}</span>
+                        <span className="group-hover:text-violet-400">📄 {file.path}</span>
                         <span className="text-[9px] text-slate-500 font-sans">({(file.size / 1024).toFixed(1)} KB)</span>
-                      </span>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -584,6 +612,72 @@ export default function RunPipeline() {
       </section>
 
       </main>
+
+      {/* Interactive File Viewer Modal */}
+      {(activeFile || loadingFile) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/50">
+              <div className="flex items-center space-x-3">
+                <span className="text-xl">📄</span>
+                <div>
+                  <h3 className="text-sm font-bold font-mono text-slate-100">{activeFile?.path || "Loading file..."}</h3>
+                  {activeFile && (
+                    <span className="text-[10px] text-slate-400 font-sans">
+                      {(activeFile.size / 1024).toFixed(2)} KB • {activeFile.content.split('\n').length} lines
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                {activeFile && (
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(activeFile.content);
+                      setCopiedFile(true);
+                      setTimeout(() => setCopiedFile(false), 2000);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-semibold transition-all cursor-pointer flex items-center space-x-1.5"
+                  >
+                    {copiedFile ? (
+                      <>
+                        <span className="text-emerald-400">✓</span>
+                        <span className="text-emerald-400 font-bold">Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>📋</span>
+                        <span>Copy Code</span>
+                      </>
+                    )}
+                  </button>
+                )}
+                <button
+                  onClick={() => setActiveFile(null)}
+                  className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all flex items-center justify-center font-bold text-sm cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto font-mono text-xs text-slate-200 bg-slate-950 custom-scrollbar flex-1">
+              {loadingFile ? (
+                <div className="py-16 text-center space-y-3">
+                  <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                  <p className="text-xs text-slate-400">Loading file content...</p>
+                </div>
+              ) : activeFile ? (
+                <pre className="whitespace-pre-wrap leading-relaxed select-text font-mono text-slate-300">
+                  <code>{activeFile.content}</code>
+                </pre>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
