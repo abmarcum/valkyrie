@@ -641,60 +641,72 @@ export default function RunPipeline() {
                     </a>
                   )}
 
-                  {/* Documentation & License Quick-Access Links */}
-                  <button
-                    onClick={() => handleOpenFile("LICENSE")}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-semibold font-mono transition-all cursor-pointer flex items-center space-x-1"
-                    title="View MIT License"
-                  >
-                    <span>⚖️</span>
-                    <span>MIT License</span>
-                  </button>
+                  {/* Documentation & License Quick-Access Links (Only render if file exists) */}
+                  {projectData.files?.some(f => f.path.toUpperCase() === "LICENSE" || f.path.toLowerCase() === "license.md") && (
+                    <button
+                      onClick={() => handleOpenFile(projectData.files?.find(f => f.path.toUpperCase() === "LICENSE" || f.path.toLowerCase() === "license.md")?.path || "LICENSE")}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-semibold font-mono transition-all cursor-pointer flex items-center space-x-1"
+                      title="View License"
+                    >
+                      <span>⚖️</span>
+                      <span>License</span>
+                    </button>
+                  )}
 
-                  <button
-                    onClick={() => handleOpenFile("README.md")}
-                    className="px-3 py-1.5 rounded-lg bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 text-violet-300 text-xs font-semibold font-mono transition-all cursor-pointer flex items-center space-x-1"
-                    title="View README manual"
-                  >
-                    <span>📖</span>
-                    <span>README</span>
-                  </button>
+                  {projectData.files?.some(f => f.path.toLowerCase() === "readme.md") && (
+                    <button
+                      onClick={() => handleOpenFile("README.md")}
+                      className="px-3 py-1.5 rounded-lg bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 text-violet-300 text-xs font-semibold font-mono transition-all cursor-pointer flex items-center space-x-1"
+                      title="View README manual"
+                    >
+                      <span>📖</span>
+                      <span>README</span>
+                    </button>
+                  )}
 
-                  <button
-                    onClick={() => handleOpenFile("docs/prd.md")}
-                    className="px-3 py-1.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-xs font-semibold font-mono transition-all cursor-pointer flex items-center space-x-1"
-                    title="View PRD Specification"
-                  >
-                    <span>📄</span>
-                    <span>PRD</span>
-                  </button>
+                  {projectData.files?.some(f => f.path.toLowerCase() === "docs/prd.md") && (
+                    <button
+                      onClick={() => handleOpenFile("docs/prd.md")}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-xs font-semibold font-mono transition-all cursor-pointer flex items-center space-x-1"
+                      title="View PRD Specification"
+                    >
+                      <span>📄</span>
+                      <span>PRD</span>
+                    </button>
+                  )}
 
-                  <button
-                    onClick={() => handleOpenFile("docs/architecture.md")}
-                    className="px-3 py-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-xs font-semibold font-mono transition-all cursor-pointer flex items-center space-x-1"
-                    title="View Architecture Specification"
-                  >
-                    <span>📐</span>
-                    <span>Architecture</span>
-                  </button>
+                  {projectData.files?.some(f => f.path.toLowerCase() === "docs/architecture.md") && (
+                    <button
+                      onClick={() => handleOpenFile("docs/architecture.md")}
+                      className="px-3 py-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-xs font-semibold font-mono transition-all cursor-pointer flex items-center space-x-1"
+                      title="View Architecture Specification"
+                    >
+                      <span>📐</span>
+                      <span>Architecture</span>
+                    </button>
+                  )}
 
-                  <button
-                    onClick={() => handleOpenFile("docs/database.md")}
-                    className="px-3 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-semibold font-mono transition-all cursor-pointer flex items-center space-x-1"
-                    title="View Database Schema"
-                  >
-                    <span>🗄</span>
-                    <span>Database</span>
-                  </button>
+                  {projectData.files?.some(f => f.path.toLowerCase() === "docs/database.md") && (
+                    <button
+                      onClick={() => handleOpenFile("docs/database.md")}
+                      className="px-3 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-semibold font-mono transition-all cursor-pointer flex items-center space-x-1"
+                      title="View Database Schema"
+                    >
+                      <span>🗄</span>
+                      <span>Database</span>
+                    </button>
+                  )}
 
-                  <button
-                    onClick={() => handleOpenFile("docs/api.md")}
-                    className="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs font-semibold font-mono transition-all cursor-pointer flex items-center space-x-1"
-                    title="View API Documentation"
-                  >
-                    <span>🔌</span>
-                    <span>API Docs</span>
-                  </button>
+                  {projectData.files?.some(f => f.path.toLowerCase() === "docs/api.md") && (
+                    <button
+                      onClick={() => handleOpenFile("docs/api.md")}
+                      className="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs font-semibold font-mono transition-all cursor-pointer flex items-center space-x-1"
+                      title="View API Documentation"
+                    >
+                      <span>🔌</span>
+                      <span>API Docs</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
