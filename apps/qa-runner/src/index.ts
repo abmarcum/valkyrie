@@ -185,7 +185,7 @@ Output ONLY the raw code inside a markdown code block (between \`\`\`${ext === "
         "Content-Type": "application/json",
         "x-valkyrie-qa-key": internalSecret
       },
-      signal: AbortSignal.timeout(45000),
+      signal: AbortSignal.timeout(180000),
       body: JSON.stringify({
         systemPrompt: "You are a professional software QA automation engineer agent.",
         userPrompt: codebasePrompt,

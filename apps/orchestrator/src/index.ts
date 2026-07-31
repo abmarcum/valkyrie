@@ -1675,6 +1675,10 @@ Do NOT leave the response empty. Output clean code structured with path header:
           cleanModuleCode = cleanModuleCode.replace(/^```[a-zA-Z0-9_-]*\n?/, "").replace(/\n?```$/, "").trim();
         }
         const moduleFilePath = path.join(projectDirPath, fileObj.path);
+        if (fs.existsSync(moduleFilePath) && fs.statSync(moduleFilePath).isDirectory()) {
+          console.warn(`[ValkyrieParser] Target module path '${moduleFilePath}' is a directory from a previous run. Removing directory to write file...`);
+          try { fs.rmSync(moduleFilePath, { recursive: true, force: true }); } catch (e) { }
+        }
         fs.mkdirSync(path.dirname(moduleFilePath), { recursive: true });
         fs.writeFileSync(moduleFilePath, cleanModuleCode + "\n");
         codeText += `\n\n## ${fileObj.path}\n${cleanModuleCode}`;
@@ -1991,30 +1995,33 @@ export function isValidFilePath(filePath: string): boolean {
   if (clean.includes(" ") || clean.includes("*") || clean.includes("<") || clean.includes(">") || clean.includes("://")) return false;
   if (clean.toLowerCase().startsWith("http:") || clean.toLowerCase().startsWith("https:") || clean.toLowerCase().startsWith("github.com")) return false;
 
-  const base = path.basename(clean);
-  const baseLower = base.toLowerCase();
-  const knownFiles = new Set(["dockerfile", "makefile", "license", "go.mod", "go.sum", "go.work", "package.json", "tsconfig.json", "requirements.txt", "readme.md"]);
-
-  const segments = clean.split(/[/\\]/);
-  // Reject paths where a known single-file root name is used as a directory segment (e.g. go.mod/something.go)
-  for (let i = 0; i < segments.length - 1; i++) {
-    const segLower = segments[i].toLowerCase();
-    if (knownFiles.has(segLower)) {
-      return false;
-    }
-  }
-
-  if (knownFiles.has(baseLower)) return true;
-
   const validExtensions = new Set([
     ".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".java", ".cpp", ".c", ".h",
     ".cs", ".rb", ".php", ".rs", ".sql", ".css", ".html", ".json", ".yaml",
     ".yml", ".md", ".txt", ".sh", ".dockerfile", ".mod", ".work", ".sum", ".env"
   ]);
+  const knownFiles = new Set(["dockerfile", "makefile", "license", "go.mod", "go.sum", "go.work", "package.json", "tsconfig.json", "requirements.txt", "readme.md"]);
+
+  const segments = clean.split(/[/\\]/);
+  // Reject paths where any parent directory segment has a file extension or known filename (e.g. main.go/proxy.go or go.mod/something.go)
+  for (let i = 0; i < segments.length - 1; i++) {
+    const seg = segments[i];
+    const segExt = path.extname(seg).toLowerCase();
+    if (segExt && validExtensions.has(segExt)) {
+      return false;
+    }
+    if (knownFiles.has(seg.toLowerCase())) {
+      return false;
+    }
+  }
+
+  const base = path.basename(clean);
+  const baseLower = base.toLowerCase();
+
+  if (knownFiles.has(baseLower)) return true;
 
   const ext = path.extname(clean).toLowerCase();
   if (validExtensions.has(ext)) {
-    // If extension has uppercase characters (e.g. .UUID), reject unless known filename like README.md
     const originalExt = path.extname(clean);
     if (originalExt !== ext && !knownFiles.has(baseLower)) {
       return false;
@@ -2067,8 +2074,15 @@ function writeProjectFiles(projectId: string, language: string, content: string,
       fs.mkdirSync(parentDir, { recursive: true });
 
       if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
-        console.warn(`[ValkyrieParser] Target path '${filePath}' is a directory. Skipping file write.`);
-        return;
+        console.warn(`[ValkyrieParser] Target path '${filePath}' is a directory. Removing directory to write file...`);
+        try { fs.rmSync(filePath, { recursive: true, force: true }); } catch (e) { }
+      }
+
+      // Ensure Go files (.go) contain a valid package declaration
+      if (currentFile.endsWith(".go")) {
+        if (!/^\s*package\s+[a-zA-Z0-9_]+/m.test(fileContent)) {
+          fileContent = "package main\n\n" + fileContent;
+        }
       }
 
       fs.writeFileSync(filePath, fileContent + "\n");
