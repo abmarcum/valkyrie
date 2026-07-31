@@ -89,6 +89,37 @@ interface SystemSettings {
   ollamaIp: string;
 }
 
+export function normalizeModelName(provider: string, model: string): string {
+  const p = (provider || "google").toLowerCase();
+  const m = (model || "").toLowerCase().trim();
+
+  if (p === "anthropic") {
+    if (m === "claude-sonnet-5" || m.includes("sonnet-5")) return "claude-sonnet-5";
+    if (m.includes("3-7") || m.includes("3.7")) return "claude-3-7-sonnet-20250219";
+    if (m.includes("haiku")) return "claude-3-5-haiku-20241022";
+    if (m.includes("opus")) return "claude-3-opus-20240229";
+    return "claude-sonnet-5";
+  }
+  if (p === "openai") {
+    if (m === "gpt-5.6-luna" || m.includes("5.6-luna") || m.includes("luna")) return "gpt-5.6-luna";
+    if (m === "o1" || m.includes("o1-")) return "o1";
+    if (m === "o3-mini" || m.includes("o3")) return "o3-mini";
+    if (m.includes("mini") || m.includes("3.5") || m.includes("3-5")) return "gpt-4o-mini";
+    return "gpt-5.6-luna";
+  }
+  if (p === "google") {
+    if (m === "gemini-3.6-flash" || m.includes("3.6-flash") || m.includes("3.6")) return "gemini-3.6-flash";
+    if (m.includes("2.5-pro") || m.includes("2-5-pro")) return "gemini-2.5-pro";
+    if (m.includes("1.5-pro") || m.includes("1-5-pro")) return "gemini-1.5-pro";
+    if (m.includes("1.5-flash") || m.includes("1-5-flash")) return "gemini-1.5-flash";
+    return "gemini-3.6-flash";
+  }
+  if (p === "ollama") {
+    return model || "qwen3-coder:latest";
+  }
+  return model;
+}
+
 function loadSettings(): SystemSettings {
   const defaultOllamaHost = process.env.OLLAMA_IP || process.env.OLLAMA_HOST || "http://localhost:11434";
   let settings: SystemSettings = {
@@ -118,15 +149,14 @@ function loadSettings(): SystemSettings {
   }
 
   // Automatically align model name if provider was switched without updating model string
-  const modelLower = settings.selectedModel.toLowerCase();
-  if (settings.selectedProvider === "anthropic" && (modelLower.includes("qwen") || modelLower.includes("llama") || modelLower.includes("deepseek") || modelLower.includes("gemini") || modelLower.includes("gpt"))) {
-    settings.selectedModel = "claude-sonnet-5";
-  } else if (settings.selectedProvider === "google" && (modelLower.includes("qwen") || modelLower.includes("llama") || modelLower.includes("deepseek") || modelLower.includes("claude") || modelLower.includes("gpt"))) {
-    settings.selectedModel = "gemini-3.5-flash";
-  } else if (settings.selectedProvider === "openai" && (modelLower.includes("qwen") || modelLower.includes("llama") || modelLower.includes("deepseek") || modelLower.includes("claude") || modelLower.includes("gemini"))) {
-    settings.selectedModel = "gpt-5.6-luna";
-  } else if (settings.selectedProvider === "ollama" && (modelLower.includes("claude") || modelLower.includes("gemini") || modelLower.includes("gpt"))) {
-    settings.selectedModel = "qwen3-coder:latest";
+  if (settings.selectedProvider === "anthropic") {
+    settings.selectedModel = normalizeModelName("anthropic", settings.selectedModel);
+  } else if (settings.selectedProvider === "google") {
+    settings.selectedModel = normalizeModelName("google", settings.selectedModel);
+  } else if (settings.selectedProvider === "openai") {
+    settings.selectedModel = normalizeModelName("openai", settings.selectedModel);
+  } else if (settings.selectedProvider === "ollama") {
+    settings.selectedModel = normalizeModelName("ollama", settings.selectedModel);
   }
 
   return settings;
@@ -630,7 +660,7 @@ async function callGeminiWithRetry(
 ): Promise<any> {
   const settings = loadSettings();
   const provider = settings.selectedProvider || "google";
-  let activeModel = model;
+  let activeModel = normalizeModelName(provider, model);
 
   const cacheKey = `${provider}:${activeModel}:${systemPrompt}:${userPrompt}`;
   if (useCache) {
@@ -706,6 +736,16 @@ async function callGeminiWithRetry(
       } else if (provider === "anthropic") {
         const anthropicKey = settings.anthropicApiKey || process.env.ANTHROPIC_API_KEY || "";
         const url = `https://api.anthropic.com/v1/messages`;
+        const bodyObj: any = {
+          model: activeModel,
+          max_tokens: 16384,
+          system: systemPrompt,
+          messages: [{ role: "user", content: userPrompt }]
+        };
+        if (activeModel.includes("3-7-sonnet")) {
+          bodyObj.thinking = { type: "enabled", budget_tokens: 2048 };
+        }
+
         const response = await fetch(url, {
           method: "POST",
           headers: {
@@ -713,13 +753,7 @@ async function callGeminiWithRetry(
             "x-api-key": anthropicKey,
             "anthropic-version": "2023-06-01"
           },
-          body: JSON.stringify({
-            model: activeModel,
-            max_tokens: 16384,
-            thinking: { type: "disabled" },
-            system: systemPrompt,
-            messages: [{ role: "user", content: userPrompt }]
-          })
+          body: JSON.stringify(bodyObj)
         });
 
         if (!response.ok) {
@@ -752,21 +786,36 @@ async function callGeminiWithRetry(
       } else if (provider === "openai") {
         const openaiKey = settings.openaiApiKey || process.env.OPENAI_API_KEY || "";
         const url = `https://api.openai.com/v1/chat/completions`;
+        const isReasoning = activeModel === "o1" || activeModel === "o3-mini";
+        const messages = isReasoning
+          ? [
+              { role: "developer", content: systemPrompt },
+              { role: "user", content: userPrompt }
+            ]
+          : [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt }
+            ];
+
+        const bodyObj: any = {
+          model: activeModel,
+          messages
+        };
+
+        if (isReasoning) {
+          bodyObj.max_completion_tokens = 16384;
+        } else {
+          bodyObj.temperature = 0.2;
+          bodyObj.max_tokens = 16384;
+        }
+
         const response = await fetch(url, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${openaiKey}`
           },
-          body: JSON.stringify({
-            model: activeModel,
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userPrompt }
-            ],
-            temperature: 0.2,
-            max_tokens: 16384
-          })
+          body: JSON.stringify(bodyObj)
         });
 
         if (!response.ok) {
@@ -842,33 +891,33 @@ async function callGeminiWithRetry(
       const errorMessage = err.message || JSON.stringify(err);
 
       // Self-healing fallback for invalid or unrecognized model names across all providers
-      if (provider === "anthropic" && (errorMessage.includes("not_found") || errorMessage.includes("unknown_model")) && activeModel !== "claude-sonnet-5") {
+      if (provider === "anthropic" && (errorMessage.includes("not_found") || errorMessage.includes("unknown_model") || errorMessage.includes("404")) && activeModel !== "claude-3-5-sonnet-20241022") {
         await addLog(
           agentName,
-          `Model '${activeModel}' is invalid or unrecognized by Anthropic. Reverting to verified stable model (claude-sonnet-5)...`,
+          `Model '${activeModel}' is invalid or unrecognized by Anthropic. Reverting to verified stable model (claude-3-5-sonnet-20241022)...`,
           "warning"
         );
-        activeModel = "claude-sonnet-5";
+        activeModel = "claude-3-5-sonnet-20241022";
         continue;
       }
 
-      if (provider === "openai" && (errorMessage.includes("404") || errorMessage.includes("400")) && activeModel !== "gpt-5.6-luna") {
+      if (provider === "openai" && (errorMessage.includes("404") || errorMessage.includes("400") || errorMessage.includes("model_not_found")) && activeModel !== "gpt-4o") {
         await addLog(
           agentName,
-          `Model '${activeModel}' is invalid or unrecognized by OpenAI. Reverting to verified stable model (gpt-5.6-luna)...`,
+          `Model '${activeModel}' is invalid or unrecognized by OpenAI. Reverting to verified stable model (gpt-4o)...`,
           "warning"
         );
-        activeModel = "gpt-5.6-luna";
+        activeModel = "gpt-4o";
         continue;
       }
 
-      if (provider === "google" && (errorMessage.includes("404") || errorMessage.includes("400")) && activeModel !== "gemini-1.5-flash") {
+      if (provider === "google" && (errorMessage.includes("404") || errorMessage.includes("400")) && activeModel !== "gemini-2.5-flash") {
         await addLog(
           agentName,
-          `Model '${activeModel}' is invalid or unrecognized by Google. Reverting to verified stable model (gemini-1.5-flash)...`,
+          `Model '${activeModel}' is invalid or unrecognized by Google. Reverting to verified stable model (gemini-2.5-flash)...`,
           "warning"
         );
-        activeModel = "gemini-1.5-flash";
+        activeModel = "gemini-2.5-flash";
         continue;
       }
 

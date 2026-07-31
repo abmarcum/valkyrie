@@ -400,15 +400,15 @@ export default function AdminDashboard() {
                   onChange={(e) => {
                     const prov = e.target.value;
                     setSelectedProvider(prov);
-                    if (prov === "google") setSelectedModel("gemini-3.5-flash");
-                    else if (prov === "anthropic") setSelectedModel("claude-sonnet-5");
-                    else if (prov === "openai") setSelectedModel("gpt-5.6-luna");
+                    if (prov === "google") setSelectedModel("gemini-2.5-flash");
+                    else if (prov === "anthropic") setSelectedModel("claude-3-5-sonnet-20241022");
+                    else if (prov === "openai") setSelectedModel("gpt-4o");
                     else if (prov === "ollama") setSelectedModel("qwen3-coder:latest");
                   }}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors"
                 >
-                  <option value="anthropic">Anthropic Claude API</option>
                   <option value="google">Google Gemini API</option>
+                  <option value="anthropic">Anthropic Claude API</option>
                   <option value="openai">OpenAI GPT API</option>
                   <option value="ollama">Ollama (Local Swarm Inference)</option>
                 </select>
@@ -420,9 +420,33 @@ export default function AdminDashboard() {
                   type="text"
                   value={selectedModel}
                   onChange={(e) => setSelectedModel(e.target.value)}
-                  placeholder="e.g. qwen3-coder:latest"
+                  placeholder="e.g. gemini-2.5-flash"
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors font-mono"
                 />
+                {/* Model Presets */}
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {(selectedProvider === "google"
+                    ? ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.5-pro"]
+                    : selectedProvider === "anthropic"
+                    ? ["claude-sonnet-5", "claude-3-5-sonnet-20241022", "claude-3-7-sonnet-20250219"]
+                    : selectedProvider === "openai"
+                    ? ["gpt-5.6-luna", "gpt-4o", "gpt-4o-mini"]
+                    : ["qwen3-coder:latest", "llama3.3", "codellama"]
+                  ).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setSelectedModel(m)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-all cursor-pointer ${
+                        selectedModel === m
+                          ? "bg-violet-500/20 text-violet-300 border-violet-500/40 font-bold"
+                          : "bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200"
+                      }`}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
