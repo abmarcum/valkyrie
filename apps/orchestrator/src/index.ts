@@ -1037,7 +1037,7 @@ async function runAgentPipeline(
           await addLog("Product Manager", `[Cache Active] Loaded existing PRD specification from docs/prd.md (${prd.length} chars).`, "info");
           completedStatuses.add("PM_PRD");
         } else {
-          const pmPrompt = `Create a Product Requirements Document (PRD) for: ${description}. Language: ${language}, Cloud: ${cloud}.`;
+          const pmPrompt = `Create a Product Requirements Document (PRD) for: ${description}. Language: ${language}, Cloud: ${cloud}. ${scopeInstruction}`;
           const response = await callGeminiWithRetry(
             apiKey,
             targetModel,
@@ -1081,7 +1081,7 @@ async function runAgentPipeline(
           completedStatuses.add("ARCHITECTING");
         } else {
           await addLog("Software Architect", `Generating structure tree and module boundaries (${projectScope.toUpperCase()} scope)...`, "info");
-          const archPrompt = `Given this PRD: ${prd}, design the system directory structure and list file paths. ${scopeInstruction}`;
+          const archPrompt = `Given this PRD: ${prd}, design the system directory structure and list file paths. NON-NEGOTIABLE ARCHITECTURAL CONSTRAINT: You MUST adhere to ${scopeInstruction}. Consolidate logic into no more than the target file limit. Do NOT over-engineer or create additional micro-packages beyond this limit.`;
           const archResponse = await callGeminiWithRetry(
             apiKey,
             targetModel,
@@ -1398,6 +1398,7 @@ async function runDeveloperSynthesis(projectId: string, useCache: boolean = true
     let compressedArch = cleanArch;
     let compressedData = cleanData;
     let compressedUi = cleanUi;
+    const projectScope = run.project.projectScope || "medium";
 
     if (cohereClient) {
       await addLog("Developer Agent", "Invoking Cohere (command-a-plus-05-2026) to compress specifications into high-density prompts...", "info");
@@ -1513,10 +1514,9 @@ Return JSON ONLY in the format:
       const defaultsByLang: Record<string, Array<{ path: string; description: string }>> = {
         go: [
           { path: "go.mod", description: "Go module definition" },
-          { path: "main.go", description: "Main entry point" },
-          { path: "main_test.go", description: "Unit test suite" },
-          { path: "pkg/api/handler.go", description: "API request handlers" },
-          { path: "pkg/types/types.go", description: "Shared data models" }
+          { path: "main.go", description: "Main application entry point" },
+          { path: "pkg/server/server.go", description: "HTTP server and routing handlers" },
+          { path: "pkg/server/server_test.go", description: "Server unit test suite" }
         ],
         typescript: [
           { path: "package.json", description: "Package manifest" },
@@ -1532,6 +1532,14 @@ Return JSON ONLY in the format:
         ]
       };
       targetFileList = defaultsByLang[language.toLowerCase()] || defaultsByLang.go;
+    }
+
+    // Hard enforcement of maximum file scope cap
+    const maxAllowedCodeFiles = projectScope === "small" ? 4 : projectScope === "large" ? 15 : 8;
+    if (targetFileList.length > maxAllowedCodeFiles) {
+      await addLog("Developer Agent", `[Scope Enforcement] Consolidating manifest from ${targetFileList.length} files to top ${maxAllowedCodeFiles} core modules for ${projectScope.toUpperCase()} scope...`, "info");
+      targetFileList = targetFileList.slice(0, maxAllowedCodeFiles);
+      writeDocFile(projectId, "manifest.json", JSON.stringify({ files: targetFileList }, null, 2));
     }
 
     let codeText = "";
