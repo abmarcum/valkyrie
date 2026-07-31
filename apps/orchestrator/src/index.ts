@@ -441,6 +441,8 @@ app.post("/api/projects/:id/llm", async (req: FastifyRequest, reply: FastifyRepl
     const inputTokens = response.usage?.input_tokens || 0;
     const outputTokens = response.usage?.output_tokens || 0;
 
+    traceLlmCall(agentName || "QA Engineer (Runner)", `${systemPrompt}\n\n${userPrompt}`, resultText, inputTokens, outputTokens);
+
     return reply.send({
       text: resultText,
       inputTokens,
