@@ -825,10 +825,6 @@ export default function RunPipeline() {
                   </>
                 )}
               </button>
-              <div className="flex items-center space-x-2 bg-slate-950/60 px-3 py-1.5 rounded-lg border border-slate-800">
-                <span className="w-2.5 h-2.5 rounded-full bg-violet-500 animate-ping" />
-                <span className="text-xs text-slate-400 font-mono">SSE Active</span>
-              </div>
             </div>
           </div>
 
