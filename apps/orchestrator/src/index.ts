@@ -1641,9 +1641,40 @@ Do NOT leave the response empty. Output clean code structured with path header:
     const initialGitResult = await pushToGithub(projectId, vcsRepo || "");
     await addLog("Developer Agent", `Code pushed to GitHub: ${initialGitResult.message}`, initialGitResult.success ? "success" : "error");
 
+    // Synthesize default MIT License
+    const mitLicenseContent = `MIT License
+
+Copyright (c) ${new Date().getFullYear()} ${run.project.name}
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`;
+
+    const licensePath = path.join(projectDirPath, "LICENSE");
+    fs.writeFileSync(licensePath, mitLicenseContent);
+
     // Tech Writer
     await addLog("Tech Writer", "Generating project documentation manuals and API references...", "info");
-    const writerPrompt = `Based on the following application description: ${description} and the generated code modules:\n${codeText}\n\nWrite high-quality technical documentation for the project. Output README.md and docs/api.md.`;
+    const writerPrompt = `Based on the following application description: ${description} and the generated code modules:\n${codeText}\n\nWrite high-quality technical documentation for the project. Output README.md and docs/api.md.
+MANDATORY DOCUMENTATION REQUIREMENTS FOR README.md:
+1. README.md MUST include explicit, step-by-step Build Instructions (e.g. build scripts, dependency installation, compiler commands for ${language}).
+2. README.md MUST include explicit, step-by-step Deployment Instructions (e.g. Docker build commands, docker-compose, Kubernetes, Terraform).
+3. Specify that the project is licensed under the open-source MIT License.
+4. In the License & Documentation section of README.md, you MUST provide explicit markdown relative links to all generated documentation files next to the License link (e.g., [MIT License](LICENSE) | [PRD Spec](docs/prd.md) | [Architecture Spec](docs/architecture.md) | [Database Schema](docs/database.md) | [UI/UX Spec](docs/ui_ux.md) | [API Docs](docs/api.md)).`;
 
     const writerResponse = await callGeminiWithRetry(
       apiKey,

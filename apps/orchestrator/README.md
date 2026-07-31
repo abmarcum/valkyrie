@@ -1,33 +1,32 @@
 # Valkyrie Swarm Orchestrator Backend
 
-The Orchestrator manages the execution flow of the AI swarm. It parses developer configs, triggers sequential agent generation loops, validates code integrity, records tokens telemetry, proxies LLM completions, and maintains local databases.
+The Orchestrator manages the execution flow of the AI swarm. It parses developer configs, triggers sequential agent generation loops, validates code integrity, records telemetry & per-file costs, proxies LLM completions, and synthesizes Infrastructure as Code (IaC) manifests.
 
 ---
 
 ## 🛠️ Key Architectural Features
 
 1. **High-Performance Fastify Engine**: Powered by **Fastify 5**, providing high-throughput REST route handling, low overhead, and asynchronous Server-Sent Events (SSE) log streaming.
-2. **Sequential Swarm Workflow**: Spawns individual agent prompts for PM, Software Architect, Data Architect, UI/UX Designer, Codebase Developer, Security Architect, Tech Writer, and QA Engineer.
-3. **Double Validation Auditing**: 
-   * The **Software Architect** validates developer files against the architectural design (capped at a maximum of 3 validation iterations).
-   * The **Security Architect** audits the developer code for injection vectors, secret leaks, and OWASP Top 10 vulnerabilities.
-4. **Immediate Remote pushes**: Codebase changes are committed and pushed to the project's GitHub repository immediately after the Security Architect finishes auditing the code, before technical manuals are built.
-5. **Self-Healing Loop & Issue Tracker**: Receives test reports from the QA Runner. If tests fail, the orchestrator automatically **submits a descriptive GitHub bug issue** containing full stdout/stderr system log segments, triggers the Developer Agent to analyze the bugs and apply fixes, commits and pushes the fixes to GitHub, and **comments on the issue with a direct link to the new commit** before closing it.
-6. **Multi-API Provider Engine**: Supports Google (Gemini), Anthropic (Claude), OpenAI (GPT), and Ollama (local server). System settings default to local Ollama inference running model `qwen3-coder:latest` on port `11434`.
-7. **LLM Proxying Service**: Decouples sandboxed runners from API key variables by hosting a centralized completion proxy.
-8. **Caching Engine**: Built-in in-memory KV prompt response caching. Can be toggled on/off in project telemetry headers.
-9. **Model Resilience**: Automatically issues warning indicators and falls back to `gemini-1.5-flash` if a Google API query yields a 404 error.
+2. **6-Language Multi-Framework Support**: Synthesizes production code for **Go**, **TypeScript**, **Python**, **Java (Spring Boot/Maven)**, **C++ (CMake)**, and **C# (.NET 8)**.
+3. **Sequential Swarm Workflow**: Spawns specialized agents for PM, Software Architect, Data Architect, UI/UX Designer, Codebase Developer, Security Architect, Tech Writer, QA Engineer, and SRE Deployer.
+4. **SRE Deployer IaC Synthesis**: Automatically generates `Dockerfile`, `docker-compose.yml`, `deploy/k8s/deployment.yaml`, and `deploy/terraform/main.tf` upon QA sign-off and commits them to GitHub.
+5. **Per-File Cost & Token Tracking**: Logs prompt and completion tokens plus USD cost for every synthesized file, persisted in `docs/manifest.json`.
+6. **Immediate Remote Pushes**: Codebase changes are committed and pushed to the project's GitHub repository immediately after synthesis and updated post-QA/SRE stages.
+7. **Self-Healing Loop**: Receives test reports from the QA Runner. If tests fail, automatically submits GitHub bug issues, triggers Developer Agent code fixes, and closes issues with commit links.
+8. **Multi-API Provider Engine**: Supports Google (Gemini), Anthropic (Claude), OpenAI (GPT), and Ollama (local server).
 
 ---
 
 ## 🔌 API Reference Guide
 
 ### 🚀 Swarm Executions
-* **`POST /api/projects/run`**: Initializes a project run. Parses tenant scopes, VCS preferences, caching toggles, and boots the swarm pipeline.
+* **`POST /api/projects/run`**: Initializes a project run. Parses tenant scopes, VCS preferences, projectScope (small/medium/large), caching toggles, and boots the swarm pipeline.
 * **`GET /api/projects/:id/status`**: Queries the active pipeline step (`status` string).
-* **`GET /api/projects/:id/stream`**: Establishes a Server-Sent Events (SSE) connection streaming real-time console logs from the active swarm.
+* **`GET /api/projects/:id/stream`**: Establishes a Server-Sent Events (SSE) connection streaming real-time console logs and project state.
 * **`GET /api/projects/:id/files`**: Returns a JSON array containing all generated files and contents.
-* **`POST /api/projects/:id/llm`**: Proxies LLM completions using the active provider, model, and secret key configurations.
+* **`GET /api/projects/:id/file?path=...`**: Fetches content, line count, and size for a specific file path.
+* **`POST /api/projects/:id/approve`**: Approves planning documents (`AWAITING_APPROVAL` gate) to initiate developer synthesis.
+* **`POST /api/projects/:id/llm`**: Proxies LLM completions using active provider settings.
 
 ### 🧪 QA Reports
 * **`POST /api/projects/:id/qa-report`**: Triggered by the QA Runner CLI to submit pass/fail status, stdout, and error details. If `passed` is false, registers a GitHub issue and spawns a background fix job.

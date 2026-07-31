@@ -1,6 +1,20 @@
 # Valkyrie: Autonomous Swarm-Driven Codebase Builder & Telemetry
 
-Valkyrie is an autonomous AI agent swarm platform designed to specify, build, verify, audit, and deploy production-grade software applications. Powered by a provider-agnostic engine, Valkyrie supports **Google Gemini**, **Anthropic Claude**, **OpenAI GPT**, and local **Ollama** models (defaulting to Ollama `qwen3-coder:latest`), coordinating specialized agents through a rigorous generation and self-correcting validation lifecycle.
+Valkyrie is an autonomous AI agent swarm platform designed to specify, build, verify, audit, and deploy production-grade software applications. Powered by a provider-agnostic engine, Valkyrie supports **Google Gemini**, **Anthropic Claude**, **OpenAI GPT**, and local **Ollama** models, coordinating specialized agents through a rigorous generation, self-correcting validation, and SRE deployment lifecycle.
+
+---
+
+## 🚀 Key Platform Capabilities
+
+- 🌐 **6-Language Multi-Framework Suite**: Generates production code in **Go** (Fiber/Gin), **TypeScript** (Next.js/Node), **Python** (FastAPI/Django), **Java** (Spring Boot/Maven), **C++** (CMake/STL), and **C#** (.NET 8/ASP.NET Core).
+- 🎛 **Configurable Source Code Scope**: Dictate application source code boundaries:
+  - ⚡ **Small Scope**: 2–4 core code files (Microservices & Utilities)
+  - 📦 **Medium Scope**: 5–8 modular code files (Standard Applications)
+  - 🏛 **Large Scope**: 9–15+ code files (Enterprise Multi-Layer Architectures)
+- 🐳 **Live SRE Infrastructure as Code (IaC)**: SRE Deployer agent automatically synthesizes complete multi-environment deployment packages (`Dockerfile`, `docker-compose.yml`, `deploy/k8s/deployment.yaml`, `deploy/terraform/main.tf`) and pushes them to GitHub.
+- 👁 **Interactive File Viewer Modal & Rendered Markup Preview**: Inspect generated files directly in the web UI, toggle between **Rendered Markup** (formatted headers, tables, callouts) and **Raw Code**, and copy snippets to clipboard.
+- 💵 **Per-File LangSmith Cost & Token Badges**: Track token usage and USD costs per file in real-time.
+- 🔄 **Cohere Context Compression Engine**: Compresses PRDs, architecture documents, database specs, and UI guidelines into high-density prompts.
 
 ---
 
@@ -10,9 +24,9 @@ Valkyrie is structured as a TypeScript monorepo containing the following compone
 
 ```
 ├── apps/
-│   ├── orchestrator/       # Fastify server managing the LLM swarm pipelines, Git pushes & LLM proxying
-│   ├── qa-runner/          # Local QA executor CLI, Docker wrapper, & Model Context Protocol (MCP) server
-│   └── web/                # Next.js telemetry dashboard, project milestones, & admin panel
+│   ├── orchestrator/       # Fastify server managing LLM swarm pipelines, SRE IaC synthesis & Git pushes
+│   ├── qa-runner/          # Universal compiler & testing CLI (Go, Java, C++, C#, TS, Python) & MCP server
+│   └── web/                # Next.js telemetry dashboard, project milestones, file viewer modal & admin panel
 ├── packages/
 │   └── db/                 # Prisma database configuration & SQLite seed script
 ├── personas/
@@ -24,50 +38,25 @@ Valkyrie is structured as a TypeScript monorepo containing the following compone
 
 ## 🤖 Swarm Agent Pipeline Flow
 
-When a project run is initiated, the orchestrator triggers the agent pipeline sequentially, where each phase is audited by validation actors before continuing:
+When a project run is initiated, the orchestrator triggers the agent pipeline sequentially:
 
 ```
-[PM Agent] (PRD Design)
-   │
-   ▼
-[Software Architect] (Technical Blueprint)
-   │
-   ▼
-[Data Architect] (Database Schema & Connection Pools)
-   │
-   ▼
-[UI/UX Designer] (Interface Guidelines)
-   │
-   ▼
-[Developer Agent] (Heavy Inline Commented Source Code)
-   │
-   ▼
-[Software Architect] (Validation Audit Loop) ───[If gaps found]───► [Re-develop]
-   │
-   ▼
-[Security Architect] (OWASP Top 10 Audit) ─────[If vulnerabilities]─► [Re-develop]
-   │
-   ▼
-   ├──► [Immediate Git Commit & push to GitHub]
-   │
-   ▼
-[Tech Writer Agent] (README & API Docs Manuals) ───► [Secondary Push]
-   │
-   ▼
-[QA Engineer (Runner)] (Startup Verification & AI Assertion Test Sweeps)
-   │
-   ├──► [Poller: Waits/retries if test plan does not exist yet]
-   │
-   ├──► [Hot Reload: Restarts test execution if test plan is updated]
-   │
-   └────────────[If tests fail (Self-Healing Loop, Max 8 attempts)]
-                 │
-                 ├──► [Creates GitHub Bug Issue with descriptive error title and full stdout/stderr logs]
-                 │
-                 ├──► [Developer Agent updates, pushes fix, comments with commit links, and closes issue]
-                 │
-                 ▼
-            [Re-develop]
+[Product Manager] ──► [Software Architect] ──► [Data Architect] ──► [UI/UX Designer]
+                                                                        │
+                                                                        ▼
+[Developer Agent] ◄───[Validation Audit Loop] ◄─── [Security Architect] (OWASP Top 10)
+      │
+      ▼
+[Immediate Git Commit & push to GitHub]
+      │
+      ▼
+[Tech Writer Agent] (README & API Manuals) ──► [Secondary Push]
+      │
+      ▼
+[QA Engineer (Runner)] (Universal Compiler & Assertion Suite) ───[If failed (Max 8 attempts)]──► [Developer Fix]
+      │
+      ▼
+[SRE Deployer Agent] (Synthesizes Dockerfile, K8s & Terraform IaC) ──► [Final Git Commit & Push]
 ```
 
 ---
@@ -80,39 +69,35 @@ Create a `.env` file at the root of the workspace. A template is provided in [.e
 # Gemini API Key (Default AI Swarm Model)
 GEMINI_API_KEY=your-gemini-key
 
+# Optional Anthropic / OpenAI Keys
+ANTHROPIC_API_KEY=your-anthropic-key
+OPENAI_API_KEY=your-openai-key
+
+# Optional Cohere Prompt Compression Key
+COHERE_API_KEY=your-cohere-key
+
 # Optional LangSmith Tracing Keys
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_API_KEY=your-langsmith-key
 LANGCHAIN_PROJECT=valkyrie
-
-# Optional GitHub App VCS Configuration
-GITHUB_APP_ID=your-github-app-id
-GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n..."
 ```
 
 ---
 
 ## 🚀 Local Deployment Instructions
 
-### 1. Prerequisite Installations
-Ensure you have Node.js 20+ and Python 3 installed. We recommend installing `uv` for fast Python dependency resolving:
-```bash
-# Install uv locally
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-### 2. Setup Dependencies & DB Schema
+### 1. Setup Dependencies & DB Schema
 From the monorepo root folder, run:
 ```bash
 # Install NPM dependencies
 npm install
 
 # Push database schema & seed tenant configurations
-npx Prisma db push -w @valkyrie/db
+npx prisma db push -w @valkyrie/db
 ```
 
-### 3. Start Development Servers
-To boot both the Express orchestrator and the Next.js web application, execute:
+### 2. Start Development Servers
+To boot both the Fastify orchestrator and the Next.js web application, execute:
 ```bash
 npm run dev
 ```
@@ -126,7 +111,7 @@ npm run dev
 The Local QA Runner executes in two modes:
 
 ### Mode A: One-off QA Pipeline Execution
-Executes unit/integration test suites and starts self-correcting loops:
+Executes universal compiler and test suites (Go, Java, C++, C#, JS, Python):
 ```bash
 npm run start -w @valkyrie/qa-runner -- --project <project-id>
 ```

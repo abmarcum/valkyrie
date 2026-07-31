@@ -17,14 +17,16 @@ This is the Next.js frontend application for Valkyrie. It provides developer int
 ### 🏠 Swarm Projects Directory (`/dashboard`)
 * Lists all project profiles linked to the user's tenant organization.
 * **Project Creator**: Configures names, descriptions, caching preferences, and VCS repository routes.
-* **VCS Integration**: Selects PAT (Personal Access Token) or GitHub App authentication (requires Installation ID configuration).
+* **6-Language Selector**: Selects Go, TypeScript, Python, Java, C++, or C#.
+* **Source Code Scope Selector**: Configures Small Scope (2–4 code files), Medium Scope (5–8 code files), or Large Scope (9–15+ code files).
 
 ### 🚀 Swarm Run Telemetry (`/project/[id]/run`)
 * **Milestone Monitor**: Shows live progress indicators for agent steps:
-  `System -> PM -> Architect -> Data Architect -> UI/UX -> Developer -> Security Architect -> Tech Writer -> QA`
-* **Console Terminal**: Streams Server-Sent Event (SSE) agent print statements and automatically autoscrolls to the bottom when new telemetry messages arrive.
-* **Action Header**: Restart swarm jobs, cancel running jobs, and toggle caching variables.
-* **Token Costs Tracker**: Renders real-time LLM token metrics and cost estimations dynamically calculated based on the selected provider.
+  `PM -> Software Architect -> Data Architect -> UI/UX -> Developer -> Security Architect -> Tech Writer -> QA -> SRE Deployer`
+* **Console Terminal**: Streams Server-Sent Event (SSE) console logs and updates automatically.
+* **Planning Approval Gate**: Interactive approval card presented during `AWAITING_APPROVAL` status to review `docs/prd.md`, `docs/architecture.md`, `docs/database.md`, and `docs/ui_ux.md` before developer synthesis.
+* **Interactive File Viewer Modal**: Click any generated file to open an interactive viewer with line numbers, copy-to-clipboard button, and a **Rendered Markup** (formatted Markdown headers, tables, callouts) vs **Raw Code** toggle.
+* **Per-File Cost & Token Badges**: Displays prompt and completion tokens and USD cost badges (`💵 $0.00028`) next to each file.
 
 ### 🔒 Administration Panel (`/admin`)
 * Restricted to Admin users.
