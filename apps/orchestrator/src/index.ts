@@ -682,7 +682,7 @@ async function callGeminiWithRetry(
           body: JSON.stringify({
             contents: [{ role: "user", parts: [{ text: userPrompt }] }],
             systemInstruction: { parts: [{ text: systemPrompt }] },
-            generationConfig: { temperature: 0.2, maxOutputTokens: 8192 }
+            generationConfig: { temperature: 0.2, maxOutputTokens: 65536 }
           })
         });
 
@@ -715,7 +715,7 @@ async function callGeminiWithRetry(
           },
           body: JSON.stringify({
             model: activeModel,
-            max_tokens: 8192,
+            max_tokens: 16384,
             thinking: { type: "disabled" },
             system: systemPrompt,
             messages: [{ role: "user", content: userPrompt }]
@@ -765,7 +765,7 @@ async function callGeminiWithRetry(
               { role: "user", content: userPrompt }
             ],
             temperature: 0.2,
-            max_tokens: 8192
+            max_tokens: 16384
           })
         });
 
@@ -790,7 +790,7 @@ async function callGeminiWithRetry(
               { role: "system", content: systemPrompt },
               { role: "user", content: userPrompt }
             ],
-            options: { temperature: 0.2, num_predict: 8192 },
+            options: { temperature: 0.2, num_predict: 16384 },
             stream: false
           })
         });
@@ -1081,7 +1081,7 @@ async function runAgentPipeline(
           completedStatuses.add("ARCHITECTING");
         } else {
           await addLog("Software Architect", `Generating structure tree and module boundaries (${projectScope.toUpperCase()} scope)...`, "info");
-          const archPrompt = `Given this PRD: ${prd}, design the system directory structure and list file paths. NON-NEGOTIABLE ARCHITECTURAL CONSTRAINT: You MUST adhere to ${scopeInstruction}. Consolidate logic into no more than the target file limit. Do NOT over-engineer or create additional micro-packages beyond this limit.`;
+          const archPrompt = `Given this PRD: ${prd}, design the system directory structure and list file paths. NON-NEGOTIABLE ARCHITECTURAL CONSTRAINT: You MUST adhere to ${scopeInstruction}. Consolidate logic into no more than the target file limit. Do NOT over-engineer or create additional micro-packages beyond this limit. COMPLETENESS MANDATE: Focus on architectural design, interface definitions, directory structures, and module responsibilities. Do NOT embed full multi-page source code implementations inside architecture.md — reserve full file code implementations for the Developer Agent. Ensure docs/architecture.md is 100% complete and untruncated.`;
           const archResponse = await callGeminiWithRetry(
             apiKey,
             targetModel,

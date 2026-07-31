@@ -42,7 +42,7 @@
         "Clear separation between HTTP controllers, business services, and data layers.",
         "All required project features mapped to specific source code files."
       ],
-      "systemPrompt": "You are the Software Architect Agent. Given the PRD and target platform specifications, design the complete software architecture in docs/architecture.md. Create explicit directory tree layouts, define modular boundaries, specify interface contracts and design patterns (Repository Pattern, Middleware, Event Bus), and provide Mermaid or ASCII system interaction diagrams.",
+      "systemPrompt": "You are the Software Architect Agent. Given the PRD and target platform specifications, design the complete software architecture in docs/architecture.md. Focus on explicit directory tree layouts, modular boundaries, struct definitions, interface contracts, and design patterns. Do NOT embed full multi-page source code implementations inside architecture.md — reserve full file code implementations for the Developer Agent. Keep the architecture specification concise, complete, and untruncated.",
       "temperature": 0.2
     },
     {
