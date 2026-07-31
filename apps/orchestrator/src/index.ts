@@ -2974,6 +2974,10 @@ Output files structured with path headers:
           sreText = (sreRes.content[0] as any).text;
         }
 
+        const sreInput = sreRes.usage?.input_tokens;
+        const sreOutput = sreRes.usage?.output_tokens;
+        traceLlmCall("SRE Deployer", srePrompt, sreText, sreInput, sreOutput);
+
         writeProjectFiles(projectId, run.project.programmingLanguage, sreText || "", false);
         await pushToGithub(projectId, run.project.vcsRepoUrl || "");
 
