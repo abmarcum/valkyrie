@@ -2,7 +2,7 @@
   <img src="docs/valkyrie-logo.jpg" alt="Valkyrie Logo" width="400" />
 </p>
 
-# Valkyrie: Autonomous Swarm-Driven Codebase Builder & Telemetry
+# Valkyrie: Autonomous Codebase Builder & Telemetry
 
 Valkyrie is an autonomous AI agent platform designed to specify, build, verify, audit, and deploy production-grade software applications. Powered by a provider-agnostic engine, Valkyrie supports **Google Gemini**, **Anthropic Claude**, **OpenAI GPT**, and local **Ollama** models, coordinating specialized agents through a rigorous generation, self-correcting validation, and SRE deployment lifecycle.
 
@@ -18,7 +18,7 @@ Valkyrie is an autonomous AI agent platform designed to specify, build, verify, 
 <br />
 
 <p align="center">
-  <b>Agent Swarm Execution & Real-Time Telemetry Dashboard</b><br />
+  <b>Agent Pipeline Execution & Real-Time Telemetry Dashboard</b><br />
   <img src="docs/valkyrie-project-screenshot.jpg" alt="Valkyrie Project Execution Screenshot" width="900" />
 </p>
 
@@ -56,7 +56,7 @@ Valkyrie is structured as a TypeScript monorepo containing the following compone
 
 ---
 
-## 🤖 Swarm Agent Pipeline Flow
+## 🤖 Agent Pipeline Flow
 
 When a project run is initiated, the orchestrator triggers the agent pipeline sequentially:
 
@@ -86,7 +86,7 @@ When a project run is initiated, the orchestrator triggers the agent pipeline se
 Create a `.env` file at the root of the workspace. A template is provided in [.env.example](file:///Users/andrew/ai-workspace/code/valkyrie/.env.example).
 
 ```ini
-# Gemini API Key (Default AI Swarm Model)
+# Gemini API Key (Default AI Model)
 GEMINI_API_KEY=your-gemini-key
 
 # Optional Anthropic / OpenAI Keys

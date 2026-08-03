@@ -14,13 +14,13 @@ This is the Next.js frontend application for Valkyrie. It provides developer int
 
 ## 🎨 Dashboard Interfaces
 
-### 🏠 Swarm Projects Directory (`/dashboard`)
+### 🏠 Projects Directory (`/dashboard`)
 * Lists all project profiles linked to the user's tenant organization.
 * **Project Creator**: Configures names, descriptions, caching preferences, and VCS repository routes.
 * **6-Language Selector**: Selects Go, TypeScript, Python, Java, C++, or C#.
 * **Source Code Scope Selector**: Configures Small Scope (2–4 code files), Medium Scope (5–8 code files), or Large Scope (9–15+ code files).
 
-### 🚀 Swarm Run Telemetry (`/project/[id]/run`)
+### 🚀 Run Telemetry (`/project/[id]/run`)
 * **Milestone Monitor**: Shows live progress indicators for agent steps:
   `PM -> Software Architect -> Data Architect -> UI/UX -> Developer -> Security Architect -> Tech Writer -> QA -> SRE Deployer`
 * **Console Terminal**: Streams Server-Sent Event (SSE) console logs and updates automatically.
@@ -30,7 +30,7 @@ This is the Next.js frontend application for Valkyrie. It provides developer int
 
 ### 🔒 Administration Panel (`/admin`)
 * Restricted to Admin users.
-* **Swarm AI Configurations Form**: Selects the system-wide AI provider (Google, Anthropic, OpenAI, Ollama) and model, saves API keys (masked with password inputs), or configures custom connection endpoints (such as Ollama's local IP address).
+* **AI Configurations Form**: Selects the system-wide AI provider (Google, Anthropic, OpenAI, Ollama) and model, saves API keys (masked with password inputs), or configures custom connection endpoints (such as Ollama's local IP address).
 * **Company Profiles Builder**: Provisions tenant organizations (Company ID slug parameter).
 * **Users Creator**: Configures users, company bindings, and RBAC roles.
 * **Telemetry Explorer**: Inspects projects associated with selected companies and calculates total LLM usage statistics.
