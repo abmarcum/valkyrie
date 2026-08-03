@@ -83,7 +83,7 @@ When a project run is initiated, the orchestrator triggers the agent pipeline se
 
 ## ⚙️ Configuration & Environment Variables
 
-Create a `.env` file at the root of the workspace. A template is provided in [.env.example](file:///Users/andrew/ai-workspace/code/valkyrie/.env.example).
+Create a `.env` file at the root of the workspace. A template is provided in [.env.example](.env.example).
 
 ```ini
 # Gemini API Key (Default AI Model)
@@ -148,9 +148,9 @@ npm run start -w @valkyrie/qa-runner -- --mcp
 
 Valkyrie provides container build definitions for all 3 core microservices:
 
-- **Orchestrator Backend**: [Dockerfile.backend](file:///Users/andrew/ai-workspace/code/valkyrie/Dockerfile.backend)
-- **Web Telemetry Dashboard**: [Dockerfile.web](file:///Users/andrew/ai-workspace/code/valkyrie/Dockerfile.web)
-- **Multi-Language QA Runner**: [apps/qa-runner/Dockerfile](file:///Users/andrew/ai-workspace/code/valkyrie/apps/qa-runner/Dockerfile)
+- **Orchestrator Backend**: [Dockerfile.backend](Dockerfile.backend)
+- **Web Telemetry Dashboard**: [Dockerfile.web](Dockerfile.web)
+- **Multi-Language QA Runner**: [apps/qa-runner/Dockerfile](apps/qa-runner/Dockerfile)
 
 ### 1. Building Docker Images
 ```bash
@@ -247,6 +247,6 @@ spec:
 
 ## 🚀 Cloud Deployment (Vercel, Render, Railway, K8s)
 
-For production deployment configuration, database migration guides (SQLite to cloud PostgreSQL), monorepo Next.js setup on Vercel, and persistent backend configuration settings on Render or Railway, see the detailed **[Production Deployment Guide](file:///Users/andrew/ai-workspace/code/valkyrie/docs/vercel_deployment.md)**.
+For production deployment configuration, database migration guides (SQLite to cloud PostgreSQL), monorepo Next.js setup on Vercel, and persistent backend configuration settings on Render or Railway, see the detailed **[Production Deployment Guide](docs/vercel_deployment.md)**.
 
 
