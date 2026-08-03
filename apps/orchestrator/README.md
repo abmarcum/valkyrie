@@ -4,7 +4,7 @@
 
 # Valkyrie Swarm Orchestrator Backend
 
-The Orchestrator manages the execution flow of the AI swarm. It parses developer configs, triggers sequential agent generation loops, validates code integrity, records telemetry & per-file costs, proxies LLM completions, and synthesizes Infrastructure as Code (IaC) manifests.
+The Orchestrator manages the execution flow of the AI pipeline. It parses developer configs, triggers sequential agent generation loops, validates code integrity, records telemetry & per-file costs, proxies LLM completions, and synthesizes Infrastructure as Code (IaC) manifests.
 
 ---
 
@@ -38,7 +38,7 @@ The Orchestrator manages the execution flow of the AI swarm. It parses developer
 ## 🔌 API Reference Guide
 
 ### 🚀 Swarm Executions
-* **`POST /api/projects/run`**: Initializes a project run. Parses tenant scopes, VCS preferences, projectScope (small/medium/large), caching toggles, and boots the swarm pipeline.
+* **`POST /api/projects/run`**: Initializes a project run. Parses tenant scopes, VCS preferences, projectScope (small/medium/large), caching toggles, and boots the pipeline.
 * **`GET /api/projects/:id/status`**: Queries the active pipeline step (`status` string).
 * **`GET /api/projects/:id/stream`**: Establishes a Server-Sent Events (SSE) connection streaming real-time console logs and project state.
 * **`GET /api/projects/:id/files`**: Returns a JSON array containing all generated files and contents.
@@ -50,7 +50,7 @@ The Orchestrator manages the execution flow of the AI swarm. It parses developer
 * **`POST /api/projects/:id/qa-report`**: Triggered by the QA Runner CLI to submit pass/fail status, stdout, and error details. If `passed` is false, registers a GitHub issue and spawns a background fix job.
 
 ### 🔒 Admin Panel Controls
-* **`GET /api/admin/settings`**: Loads active swarm model, provider, keys, and endpoint configurations (Admin only).
+* **`GET /api/admin/settings`**: Loads active model, provider, keys, and endpoint configurations (Admin only).
 * **`POST /api/admin/settings`**: Updates and saves global Swarm configuration preferences (Admin only).
 * **`POST /api/admin/companies`**: Provisions a new company organization (required `id` slug parameter).
 * **`GET /api/admin/companies`**: Lists all registered companies.

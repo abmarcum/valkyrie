@@ -4,7 +4,7 @@
 
 # Valkyrie: Autonomous Swarm-Driven Codebase Builder & Telemetry
 
-Valkyrie is an autonomous AI agent swarm platform designed to specify, build, verify, audit, and deploy production-grade software applications. Powered by a provider-agnostic engine, Valkyrie supports **Google Gemini**, **Anthropic Claude**, **OpenAI GPT**, and local **Ollama** models, coordinating specialized agents through a rigorous generation, self-correcting validation, and SRE deployment lifecycle.
+Valkyrie is an autonomous AI agent platform designed to specify, build, verify, audit, and deploy production-grade software applications. Powered by a provider-agnostic engine, Valkyrie supports **Google Gemini**, **Anthropic Claude**, **OpenAI GPT**, and local **Ollama** models, coordinating specialized agents through a rigorous generation, self-correcting validation, and SRE deployment lifecycle.
 
 ---
 
@@ -44,13 +44,13 @@ Valkyrie is structured as a TypeScript monorepo containing the following compone
 
 ```
 ├── apps/
-│   ├── orchestrator/       # Fastify server managing LLM swarm pipelines, SRE IaC synthesis & Git pushes
+│   ├── orchestrator/       # Fastify server managing LLM pipelines, SRE IaC synthesis & Git pushes
 │   ├── qa-runner/          # Universal compiler & testing CLI (Go, Java, C++, C#, TS, Python) & MCP server
 │   └── web/                # Next.js telemetry dashboard, project milestones, file viewer modal & admin panel
 ├── packages/
 │   └── db/                 # Prisma database configuration & SQLite seed script
 ├── personas/
-│   └── agents.json         # Prompt parameters & temperature models for the agent swarm
+│   └── agents.json         # Prompt parameters & temperature models for the agents 
 └── data/                   # Database specifications, connections, & migrations (database.md)
 ```
 

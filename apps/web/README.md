@@ -46,7 +46,7 @@ Users log in by entering their username at `/login`. The system issues a JWT con
 * All other usernames -> Assumes `user` role.
 
 ### RBAC Enforcement matrix:
-* **Viewer**: Read-only access. Telemetry and dashboards are visible, but run creation, swarm starts, restarts, cancellations, and administration menus are disabled.
+* **Viewer**: Read-only access. Telemetry and dashboards are visible, but run creation, pipeline starts, restarts, cancellations, and administration menus are disabled.
 * **User**: Standard developer access. Allowed to create, delete, and configure projects under their company namespace. Admin panel is blocked.
 * **Admin**: Complete system clearance. Able to provision companies, invite users, access analytics, and manage all projects.
 
