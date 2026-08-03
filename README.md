@@ -8,6 +8,22 @@ Valkyrie is an autonomous AI agent swarm platform designed to specify, build, ve
 
 ---
 
+## 📸 Platform Overview & Telemetry Screenshots
+
+<p align="center">
+  <b>Builder Dashboard & Project Specification</b><br />
+  <img src="docs/valkyrie-dashboard-screenshot.jpg" alt="Valkyrie Dashboard Screenshot" width="900" />
+</p>
+
+<br />
+
+<p align="center">
+  <b>Agent Swarm Execution & Real-Time Telemetry Dashboard</b><br />
+  <img src="docs/valkyrie-project-screenshot.jpg" alt="Valkyrie Project Execution Screenshot" width="900" />
+</p>
+
+---
+
 ## 🚀 Key Platform Capabilities
 
 - 🌐 **6-Language Multi-Framework Suite**: Generates production code in **Go** (Fiber/Gin), **TypeScript** (Next.js/Node), **Python** (FastAPI/Django), **Java** (Spring Boot/Maven), **C++** (CMake/STL), and **C#** (.NET 8/ASP.NET Core).

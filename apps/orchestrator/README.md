@@ -8,6 +8,20 @@ The Orchestrator manages the execution flow of the AI swarm. It parses developer
 
 ---
 
+## 📸 Swarm Execution & Telemetry Screenshots
+
+<p align="center">
+  <img src="../../docs/valkyrie-dashboard-screenshot.jpg" alt="Valkyrie Dashboard Screenshot" width="800" />
+</p>
+
+<br />
+
+<p align="center">
+  <img src="../../docs/valkyrie-project-screenshot.jpg" alt="Valkyrie Project Execution Screenshot" width="800" />
+</p>
+
+---
+
 ## 🛠️ Key Architectural Features
 
 1. **High-Performance Fastify Engine**: Powered by **Fastify 5**, providing high-throughput REST route handling, low overhead, and asynchronous Server-Sent Events (SSE) log streaming.
