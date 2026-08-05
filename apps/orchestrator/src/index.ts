@@ -704,17 +704,22 @@ async function callGeminiWithRetry(
       let resultText = "";
       let inputTokens = 0;
       let outputTokens = 0;
+      let activeSystemPrompt = systemPrompt;
+      if (attempt > 0) {
+        activeSystemPrompt += "\n\n[RETRY MANDATE] Your previous output was empty or truncated due to token limits. You MUST produce complete, un-truncated, concise code or text without conversational preambles.";
+      }
 
       if (provider === "google") {
         const googleKey = settings.googleApiKey || apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${googleKey}`;
+        const maxTokens = attempt > 0 ? 128000 : 65536;
         const response = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            generationConfig: { temperature: 0.2, maxOutputTokens: 65536 }
+            systemInstruction: { parts: [{ text: activeSystemPrompt }] },
+            generationConfig: { temperature: 0.2, maxOutputTokens: maxTokens }
           })
         });
 
@@ -738,14 +743,15 @@ async function callGeminiWithRetry(
       } else if (provider === "anthropic") {
         const anthropicKey = settings.anthropicApiKey || process.env.ANTHROPIC_API_KEY || "";
         const url = `https://api.anthropic.com/v1/messages`;
+        const tokenLimit = attempt > 0 ? 32768 : 16384;
         const bodyObj: any = {
           model: activeModel,
-          max_tokens: 16384,
-          system: systemPrompt,
+          max_tokens: tokenLimit,
+          system: activeSystemPrompt,
           messages: [{ role: "user", content: userPrompt }]
         };
-        if (activeModel.includes("3-7-sonnet")) {
-          bodyObj.thinking = { type: "enabled", budget_tokens: 2048 };
+        if (activeModel.includes("3-7-sonnet") || activeModel.includes("sonnet")) {
+          bodyObj.thinking = { type: "enabled", budget_tokens: 4096 };
         }
 
         const response = await fetch(url, {
@@ -791,24 +797,25 @@ async function callGeminiWithRetry(
         const isReasoning = activeModel === "o1" || activeModel === "o3-mini";
         const messages = isReasoning
           ? [
-              { role: "developer", content: systemPrompt },
+              { role: "developer", content: activeSystemPrompt },
               { role: "user", content: userPrompt }
             ]
           : [
-              { role: "system", content: systemPrompt },
+              { role: "system", content: activeSystemPrompt },
               { role: "user", content: userPrompt }
             ];
 
+        const tokenLimit = attempt > 0 ? 32768 : 16384;
         const bodyObj: any = {
           model: activeModel,
           messages
         };
 
         if (isReasoning) {
-          bodyObj.max_completion_tokens = 16384;
+          bodyObj.max_completion_tokens = tokenLimit;
         } else {
           bodyObj.temperature = 0.2;
-          bodyObj.max_tokens = 16384;
+          bodyObj.max_tokens = tokenLimit;
         }
 
         const response = await fetch(url, {
@@ -832,16 +839,17 @@ async function callGeminiWithRetry(
       } else if (provider === "ollama") {
         const ollamaBaseUrl = settings.ollamaIp || "http://localhost:11434";
         const url = `${ollamaBaseUrl}/api/chat`;
+        const tokenLimit = attempt > 0 ? 32768 : 16384;
         const response = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model: activeModel,
             messages: [
-              { role: "system", content: systemPrompt },
+              { role: "system", content: activeSystemPrompt },
               { role: "user", content: userPrompt }
             ],
-            options: { temperature: 0.2, num_predict: 16384 },
+            options: { temperature: 0.2, num_predict: tokenLimit },
             stream: false
           })
         });
@@ -2034,6 +2042,57 @@ export function isValidFilePath(filePath: string): boolean {
   return false;
 }
 
+// Universal code validation and repair helper (bracket matching & truncation detection)
+export function validateAndRepairCode(code: string, filename: string): string {
+  if (!code) return "";
+  let cleanCode = code.trim();
+  if (cleanCode.startsWith("```")) {
+    cleanCode = cleanCode.replace(/^```[a-zA-Z0-9_-]*\n?/, "").replace(/\n?```$/, "").trim();
+  }
+
+  // Bracket completeness check for C-style / brace languages (.go, .ts, .js, .java, .cpp, .cs)
+  const ext = path.extname(filename).toLowerCase();
+  const isBraceLang = [".go", ".ts", ".js", ".java", ".cpp", ".cs", ".c", ".h"].includes(ext);
+
+  if (isBraceLang) {
+    let openBraces = 0;
+    let inString = false;
+    let stringChar = "";
+    let isEscaped = false;
+
+    for (let i = 0; i < cleanCode.length; i++) {
+      const char = cleanCode[i];
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        isEscaped = true;
+        continue;
+      }
+      if (inString) {
+        if (char === stringChar) {
+          inString = false;
+        }
+      } else if (char === '"' || char === "'" || char === "`") {
+        inString = true;
+        stringChar = char;
+      } else if (char === "{") {
+        openBraces++;
+      } else if (char === "}") {
+        if (openBraces > 0) openBraces--;
+      }
+    }
+
+    if (openBraces > 0) {
+      console.warn(`[ValkyrieParser] Detected ${openBraces} unclosed '{' in ${filename}. Auto-repairing by appending closing braces...`);
+      cleanCode += "\n" + "}".repeat(openBraces);
+    }
+  }
+
+  return cleanCode;
+}
+
 // Write generated files to storage
 function writeProjectFiles(projectId: string, language: string, content: string, allowFallback = true) {
   const dirPath = path.join(__dirname, `../../../generated/${projectId}`);
@@ -2049,13 +2108,7 @@ function writeProjectFiles(projectId: string, language: string, content: string,
     if (!currentFile) return;
 
     let fileContent = currentFileLines.join("\n").trim();
-    if (fileContent.startsWith("```")) {
-      fileContent = fileContent.replace(/^```[a-zA-Z0-9_-]*\n?/, "");
-    }
-    if (fileContent.endsWith("```")) {
-      fileContent = fileContent.replace(/\n?```$/, "");
-    }
-    fileContent = fileContent.trim();
+    fileContent = validateAndRepairCode(fileContent, currentFile);
 
     if (fileContent.length > 0) {
       const filePath = path.join(dirPath, currentFile);
@@ -3178,7 +3231,6 @@ async function createGithubIssue(projectId: string, title: string, body: string)
         const openIssues = await listResponse.json() as any[];
         const duplicate = openIssues.find(iss => iss.title === title);
         if (duplicate) {
-          console.log(`[GitHubIssue] Matching duplicate open issue found: #${duplicate.number}`);
           return {
             success: true,
             issueNumber: duplicate.number,

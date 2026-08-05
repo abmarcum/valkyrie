@@ -248,17 +248,71 @@ export function validateTestScriptSafety(code: string): { safe: boolean; reason?
   return { safe: true };
 }
 
+// Universal Dependency Resolution across all supported languages
+export function resolveSandboxDependencies(sandboxDir: string, mainFilename: string = ""): Promise<void> {
+  return new Promise((resolve) => {
+    try {
+      const dirFiles = fs.existsSync(sandboxDir) ? fs.readdirSync(sandboxDir) : [];
+      const hasGoMod = fs.existsSync(path.join(sandboxDir, "go.mod"));
+      const hasGoFiles = hasGoMod || mainFilename.endsWith(".go") || dirFiles.some(f => f.endsWith(".go"));
+      
+      const hasPackageJson = fs.existsSync(path.join(sandboxDir, "package.json"));
+      const hasNodeModules = fs.existsSync(path.join(sandboxDir, "node_modules"));
+
+      const hasRequirements = fs.existsSync(path.join(sandboxDir, "requirements.txt"));
+      const hasPom = fs.existsSync(path.join(sandboxDir, "pom.xml"));
+      const hasCsproj = dirFiles.some(f => f.endsWith(".csproj"));
+      const hasCmake = fs.existsSync(path.join(sandboxDir, "CMakeLists.txt"));
+
+      let depCmd = "";
+
+      if (hasGoFiles) {
+        depCmd = "go mod tidy || true";
+      } else if (hasPackageJson && !hasNodeModules) {
+        depCmd = "npm install --no-audit --no-fund || true";
+      } else if (hasRequirements) {
+        depCmd = "pip install -r requirements.txt || true";
+      } else if (hasPom) {
+        depCmd = "mvn dependency:resolve || true";
+      } else if (hasCsproj) {
+        depCmd = "dotnet restore || true";
+      } else if (hasCmake) {
+        depCmd = "cmake -B build || true";
+      }
+
+      if (!depCmd) {
+        return resolve();
+      }
+
+      console.log(`[QA Runner] Resolving sandbox dependencies using command: ${depCmd}`);
+      exec(depCmd, { cwd: sandboxDir, timeout: 30000 }, (err) => {
+        if (err) {
+          console.warn(`[QA Runner] Dependency resolution warning (${depCmd}): ${err.message}`);
+        } else {
+          console.log(`[QA Runner] Sandbox dependencies resolved successfully.`);
+        }
+        resolve();
+      });
+    } catch (e: any) {
+      console.warn(`[QA Runner] Error checking sandbox dependencies: ${e.message}`);
+      resolve();
+    }
+  });
+}
+
 // Verify that the application can start up and run without crashing
 export function verifyApplicationStartup(sandboxDir: string, mainFilename: string, hasUv: boolean): Promise<{ success: boolean, logs: string[], errorMsg: string }> {
   return new Promise(async (resolve) => {
+    await resolveSandboxDependencies(sandboxDir, mainFilename);
+
     let command = "";
-    if (mainFilename.endsWith(".go")) {
-      command = `go run "${path.join(sandboxDir, mainFilename)}" || go build -v ./...`;
-    } else if (mainFilename.endsWith(".java")) {
-      command = `mvn compile || javac "${path.join(sandboxDir, mainFilename)}"`;
-    } else if (mainFilename.endsWith(".cpp")) {
-      command = `g++ -std=c++17 -o app "${path.join(sandboxDir, mainFilename)}"`;
-    } else if (mainFilename.endsWith(".cs")) {
+    if (mainFilename.endsWith(".go") || fs.existsSync(path.join(sandboxDir, "go.mod"))) {
+      command = `go run . || go build -v ./...`;
+    } else if (mainFilename.endsWith(".java") || fs.existsSync(path.join(sandboxDir, "pom.xml"))) {
+      command = `mvn compile || javac *.java`;
+    } else if (mainFilename.endsWith(".cpp") || fs.existsSync(path.join(sandboxDir, "CMakeLists.txt"))) {
+      command = `cmake --build build || g++ -std=c++17 *.cpp -o app`;
+    } else if (mainFilename.endsWith(".cs") || fs.existsSync(sandboxDir) && fs.readdirSync(sandboxDir).some(f => f.endsWith(".csproj"))) {
       command = `dotnet build`;
     } else if (mainFilename.endsWith(".js") || mainFilename.endsWith(".ts")) {
       command = `node "${path.join(sandboxDir, mainFilename)}"`;
@@ -478,6 +532,8 @@ async function executeQA(targetProjectId?: string) {
       }
       console.log(`\n[QA Runner] Application startup verified successfully. Proceeding to AI QA Agent assertions testing...\n`);
     }
+
+    await resolveSandboxDependencies(sandboxDir, testFile.name);
 
     console.log(`[3/3] Locating and executing test script assertions...`);
 
