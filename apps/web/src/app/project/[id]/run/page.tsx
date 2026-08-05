@@ -218,7 +218,8 @@ export default function RunPipeline() {
   const [projectData, setProjectData] = useState<ProjectData | null>(null);
   const [showAllFiles, setShowAllFiles] = useState(false);
   
-  const logsEndRef = useRef<HTMLDivElement | null>(null);
+  const logsContainerRef = useRef<HTMLDivElement | null>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
   const [copied, setCopied] = useState(false);
 
   const handleCopyLogs = () => {
@@ -391,9 +392,25 @@ export default function RunPipeline() {
     }
   };
 
+  const handleLogsScroll = () => {
+    const container = logsContainerRef.current;
+    if (!container) return;
+    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight <= 40;
+    setAutoScroll(isAtBottom);
+  };
+
+  const scrollToBottom = () => {
+    if (logsContainerRef.current) {
+      logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
+      setAutoScroll(true);
+    }
+  };
+
   useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
+    if (autoScroll && logsContainerRef.current) {
+      logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
+    }
+  }, [logs, autoScroll]);
 
   useEffect(() => {
     // Set active mount time on client
@@ -811,6 +828,17 @@ export default function RunPipeline() {
             </div>
             <div className="flex items-center space-x-3">
               <button
+                onClick={scrollToBottom}
+                className={`px-3 py-1.5 rounded-lg border text-xs font-sans font-medium transition-all flex items-center space-x-1.5 shadow-sm active:scale-95 cursor-pointer ${
+                  autoScroll 
+                    ? "bg-slate-800/60 border-slate-700/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                    : "bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30 font-semibold animate-pulse"
+                }`}
+                title={autoScroll ? "Auto-scroll enabled (scroll up to pause)" : "Auto-scroll paused (click to resume)"}
+              >
+                <span>{autoScroll ? "⏬ Auto-scroll" : "⬇️ Resume Auto-scroll"}</span>
+              </button>
+              <button
                 onClick={handleCopyLogs}
                 className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-sans font-medium transition-all flex items-center space-x-1.5 shadow-sm active:scale-95 cursor-pointer"
                 title="Copy all live logs to clipboard"
@@ -836,7 +864,11 @@ export default function RunPipeline() {
             </div>
           )}
 
-          <div className="flex-1 bg-slate-950 rounded-xl border border-slate-800 p-6 font-mono text-xs overflow-y-scroll custom-scrollbar space-y-4 max-h-[500px]">
+          <div 
+            ref={logsContainerRef}
+            onScroll={handleLogsScroll}
+            className="flex-1 bg-slate-950 rounded-xl border border-slate-800 p-6 font-mono text-xs overflow-y-scroll custom-scrollbar space-y-4 max-h-[500px]"
+          >
             {logs.map((log, index) => (
               <div key={index} className="space-y-1">
                 <div className="flex items-center space-x-2 text-[10px]">
@@ -864,7 +896,6 @@ export default function RunPipeline() {
                 </p>
               </div>
             ))}
-            <div ref={logsEndRef} />
           </div>
         </div>
       </section>
